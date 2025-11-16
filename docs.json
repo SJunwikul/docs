@@ -49,6 +49,7 @@
       },
       {
         "tab": "API reference",
+        "openapi": "https://app.stainless.com/api/spec/documented/ares/openapi.documented.yml",
         "groups": [
           {
             "group": "API documentation",
