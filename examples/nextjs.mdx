@@ -1,0 +1,661 @@
+---
+title: "Next.js Example"
+description: "Complete Next.js App Router example with ARES and Clerk"
+---
+
+## Overview
+
+This is a complete, production-ready Next.js App Router application integrating ARES with Clerk authentication using **SDK v0.3.1 helpers** for minimal code.
+
+This example demonstrates:
+
+- **One-line ARES integration** with `createAresRoutes()`
+- **Automatic credit deduction** with `withCreditsCheck()`
+- **React hooks** for client-side UI with `useAres()`
+- User authentication with Clerk + ARES OAuth
+- TypeScript best practices
+- Production-ready error handling
+
+<Note>
+  This example uses the new SDK v0.3.1 helpers that reduce integration code by up to 85%.
+</Note>
+
+## Project Setup
+
+### 1. Create Next.js Project
+
+```bash
+npx create-next-app@latest ares-demo
+cd ares-demo
+```
+
+Choose these options:
+- TypeScript: Yes
+- ESLint: Yes
+- Tailwind CSS: Yes
+- App Router: Yes
+
+### 2. Install Dependencies
+
+```bash
+npm install @clerk/nextjs ares-sdk
+```
+
+### 3. Environment Variables
+
+Create `.env.local`:
+
+```bash .env.local
+# Clerk
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+
+# ARES
+ARES_CLIENT_ID=your_partner_client_id
+ARES_CLIENT_SECRET=your_partner_client_secret
+
+# App URL
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+```
+
+## File Structure
+
+```
+app/
+├── layout.tsx
+├── page.tsx
+├── dashboard/
+│   └── page.tsx
+├── api/
+│   ├── ares/                       # ARES integration (1 file!)
+│   │   └── route.ts                # GET/POST handlers with createAresRoutes()
+│   └── generate/                   # Example credit-protected endpoint
+│       └── route.ts                # Uses withCreditsCheck()
+├── components/
+│   ├── CreditsDisplay.tsx          # Uses useAres() hook
+│   └── ServiceButton.tsx
+└── lib/
+    └── pricing.ts                  # Centralized pricing config
+```
+
+**Simplified compared to manual implementation:**
+- ❌ No custom ARES client wrapper needed
+- ❌ No manual token retrieval logic
+- ✅ Just use SDK helpers!
+
+## Implementation
+
+### Root Layout
+
+```typescript app/layout.tsx
+import { ClerkProvider } from '@clerk/nextjs';
+import './globals.css';
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: 'ARES Demo App',
+  description: 'Example ARES integration with Next.js',
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <ClerkProvider>
+      <html lang="en">
+        <body>{children}</body>
+      </html>
+    </ClerkProvider>
+  );
+}
+```
+
+### Middleware
+
+```typescript middleware.ts
+import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+
+const isPublicRoute = createRouteMatcher(['/sign-in(.*)', '/sign-up(.*)', '/']);
+
+export default clerkMiddleware(async (auth, request) => {
+  if (!isPublicRoute(request)) {
+    await auth.protect();
+  }
+});
+
+export const config = {
+  matcher: [
+    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    '/(api|trpc)(.*)',
+  ],
+};
+```
+
+### Home Page
+
+```typescript app/page.tsx
+import { SignInButton, SignedIn, SignedOut, UserButton } from '@clerk/nextjs';
+
+export default function Home() {
+  return (
+    <main className="flex min-h-screen flex-col items-center justify-center p-24">
+      <div className="max-w-md text-center">
+        <h1 className="mb-8 text-4xl font-bold">ARES Demo App</h1>
+
+        <SignedOut>
+          <p className="mb-4 text-gray-600">
+            Sign in with ARES to access AI services
+          </p>
+          <SignInButton mode="modal">
+            <button className="rounded-lg bg-indigo-600 px-6 py-3 text-white hover:bg-indigo-700">
+              Sign In with ARES
+            </button>
+          </SignInButton>
+        </SignedOut>
+
+        <SignedIn>
+          <div className="space-y-4">
+            <UserButton />
+            <a
+              href="/dashboard"
+              className="block rounded-lg bg-green-600 px-6 py-3 text-white hover:bg-green-700"
+            >
+              Go to Dashboard
+            </a>
+          </div>
+        </SignedIn>
+      </div>
+    </main>
+  );
+}
+```
+
+### Dashboard Page
+
+```typescript app/dashboard/page.tsx
+import { auth } from '@clerk/nextjs/server';
+import { redirect } from 'next/navigation';
+import { UserCredits } from '@/components/UserCredits';
+import { ServiceButton } from '@/components/ServiceButton';
+
+export default async function Dashboard() {
+  const { userId } = await auth();
+
+  if (!userId) {
+    redirect('/sign-in');
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-8">
+      <div className="mx-auto max-w-4xl">
+        <h1 className="mb-8 text-3xl font-bold">Dashboard</h1>
+
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* User Credits Card */}
+          <div className="rounded-lg bg-white p-6 shadow">
+            <h2 className="mb-4 text-xl font-semibold">Your Credits</h2>
+            <UserCredits />
+          </div>
+
+          {/* Services Card */}
+          <div className="rounded-lg bg-white p-6 shadow">
+            <h2 className="mb-4 text-xl font-semibold">Available Services</h2>
+            <div className="space-y-3">
+              <ServiceButton
+                cost={10}
+                serviceName="Generate Text"
+                description="AI-powered text generation"
+              />
+              <ServiceButton
+                cost={20}
+                serviceName="Generate Image"
+                description="AI-powered image creation"
+              />
+              <ServiceButton
+                cost={50}
+                serviceName="Premium Analysis"
+                description="Advanced AI analysis"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+### Pricing Configuration
+
+Create a centralized pricing config using the SDK helper:
+
+```typescript lib/pricing.ts
+import { createPricing } from 'ares-sdk/lib/pricing';
+
+// Define all your service costs in one place
+const PRICING_VALUES = {
+  TEXT_GENERATION: 10,
+  IMAGE_GENERATION: 20,
+  PREMIUM_ANALYSIS: 50,
+} as const;
+
+export type PricingAction = keyof typeof PRICING_VALUES;
+export const pricing = createPricing(PRICING_VALUES);
+
+// Usage:
+// pricing.TEXT_GENERATION            // 10
+// pricing.get('IMAGE_GENERATION')    // 20
+// pricing.getSummary()               // Array with formatted strings
+```
+
+### ARES API Route (Complete Integration)
+
+Create a complete ARES integration with **one line of code**:
+
+```typescript app/api/ares/route.ts
+import { createAresRoutes } from 'ares-sdk/lib/api-routes';
+import { pricing } from '@/lib/pricing';
+
+// Create GET/POST handlers automatically
+const { GET: getAresUser, POST } = createAresRoutes();
+
+// Optional: Wrap GET to add app-specific data
+export async function GET() {
+  const response = await getAresUser();
+  if (!response.ok) return response;
+
+  const data = await response.json();
+  return Response.json({
+    ...data,
+    pricing: pricing.getSummary(), // Add your pricing info
+  });
+}
+
+export { POST };
+```
+
+**That's it!** This creates:
+- `GET /api/ares` - Returns user profile and credits
+- `POST /api/ares` - Records usage and deducts credits
+
+**Response from GET:**
+```json
+{
+  "success": true,
+  "user": {
+    "id": "usr_123",
+    "name": "John Doe",
+    "email": "john@example.com",
+    "credits": 150,
+    "picture": "https://..."
+  },
+  "pricing": [
+    { "action": "TEXT_GENERATION", "credits": 10, "formattedCredits": "10 credits" },
+    { "action": "IMAGE_GENERATION", "credits": 20, "formattedCredits": "20 credits" }
+  ]
+}
+```
+
+### Credit-Protected Endpoint
+
+Create an endpoint that automatically checks and deducts credits:
+
+```typescript app/api/generate/route.ts
+import { withCreditsCheck } from 'ares-sdk/lib/api-routes';
+import { pricing } from '@/lib/pricing';
+
+interface GenerateRequest {
+  prompt: string;
+  service: 'text' | 'image' | 'premium';
+}
+
+export const POST = withCreditsCheck<GenerateRequest>(
+  {
+    // Calculate credits from parsed body (SDK handles parsing!)
+    credits: (body) => {
+      const action = body.service === 'text'
+        ? 'TEXT_GENERATION'
+        : body.service === 'image'
+        ? 'IMAGE_GENERATION'
+        : 'PREMIUM_ANALYSIS';
+
+      return pricing.get(action);
+    },
+    usage: (body) => `${body.service} generation`,
+  },
+  async (request, { user, body }) => {
+    // Credits already deducted! ✅
+    // Body already parsed with type safety! ✅
+
+    // Your business logic here
+    const result = await generateContent(body.prompt, body.service);
+
+    return Response.json({
+      success: true,
+      result,
+      credits_remaining: user.credits,
+    });
+  }
+);
+
+// Your generation function
+async function generateContent(prompt: string, service: string) {
+  // Implement your AI generation logic
+  return {
+    output: `Generated ${service} for: ${prompt}`,
+    timestamp: new Date().toISOString(),
+  };
+}
+```
+
+**What this does automatically:**
+1. ✅ Parses request body with type safety
+2. ✅ Calculates credits based on service type
+3. ✅ Checks user has enough credits
+4. ✅ Deducts credits before your code runs
+5. ✅ Returns 402 error if insufficient credits
+6. ✅ Passes typed body to your handler
+
+**No manual credit checking needed!**
+
+### Component: Credits Display
+
+Use the React hook for automatic credit display with auto-refresh:
+
+```tsx components/CreditsDisplay.tsx
+'use client';
+
+import { useAres } from 'ares-sdk/lib/react';
+
+export function CreditsDisplay() {
+  const { user, loading, error } = useAres('/api/ares', {
+    refreshInterval: 300000,  // Refresh every 5 minutes
+    revalidateOnFocus: true,  // Refresh on window focus
+  });
+
+  if (loading) {
+    return <div className="animate-pulse">Loading credits...</div>;
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-md bg-red-50 p-4 text-red-800">
+        Error: {error}
+      </div>
+    );
+  }
+
+  if (!user) return null;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        {user.picture && (
+          <img
+            src={user.picture}
+            alt={user.name}
+            className="h-12 w-12 rounded-full"
+          />
+        )}
+        <div>
+          <p className="font-semibold">{user.name}</p>
+          <p className="text-sm text-gray-600">{user.email}</p>
+        </div>
+      </div>
+      <div className="rounded-lg bg-gradient-to-r from-indigo-500 to-purple-600 p-4 text-white">
+        <p className="text-sm opacity-90">Available Credits</p>
+        <p className="text-3xl font-bold">{user.credits.toLocaleString()}</p>
+      </div>
+    </div>
+  );
+}
+```
+
+**Features:**
+- ✅ Auto-fetches on mount
+- ✅ Auto-refreshes every 5 minutes
+- ✅ Auto-refreshes on window focus
+- ✅ Built-in loading/error states
+
+### Component: Service Button
+
+Use the combined hook for credit operations:
+
+```tsx components/ServiceButton.tsx
+'use client';
+
+import { useAres } from 'ares-sdk/lib/react';
+import { useState } from 'react';
+
+type ServiceButtonProps = {
+  cost: number;
+  serviceName: string;
+  description: string;
+  service: 'text' | 'image' | 'premium';
+};
+
+export function ServiceButton({ cost, serviceName, description, service }: ServiceButtonProps) {
+  const { recordUsage, recording } = useAres('/api/ares');
+  const [result, setResult] = useState<string | null>(null);
+
+  async function handleService() {
+    setResult(null);
+
+    // Call your generation endpoint
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: `Generate ${serviceName}`,
+        service,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 402) {
+        setResult(`Insufficient credits. This service costs ${cost} credits.`);
+      } else {
+        setResult(`Error: ${data.error || 'Failed to generate'}`);
+      }
+      return;
+    }
+
+    setResult(`Success! Generated ${serviceName}. ${data.credits_remaining} credits remaining.`);
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 p-4">
+      <div className="mb-3">
+        <h3 className="font-semibold">{serviceName}</h3>
+        <p className="text-sm text-gray-600">{description}</p>
+        <p className="mt-1 text-sm font-medium text-indigo-600">{cost} credits</p>
+      </div>
+
+      <button
+        onClick={handleService}
+        disabled={recording}
+        className="w-full rounded-md bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700 disabled:opacity-50"
+      >
+        {recording ? 'Processing...' : `Use Service (${cost} credits)`}
+      </button>
+
+      {result && (
+        <p className="mt-2 text-sm text-gray-700">{result}</p>
+      )}
+    </div>
+  );
+}
+```
+
+## Code Comparison: Before vs After
+
+### Before (Manual Implementation)
+
+```typescript
+// ~100 lines of boilerplate code
+// Manual token retrieval
+// Manual credit checking
+// Manual error handling
+// Manual state management
+```
+
+### After (SDK v0.3.1 Helpers)
+
+```typescript
+// API Route: ~15 lines
+export const { GET, POST } = createAresRoutes();
+
+// Protected Endpoint: ~20 lines
+export const POST = withCreditsCheck({ credits: 50, usage: 'Gen' }, handler);
+
+// React Component: ~15 lines
+const { user, recordUsage, recording } = useAres('/api/ares');
+```
+
+**Total code reduction: ~85%** ✨
+
+## Key Benefits
+
+<CardGroup cols={2}>
+  <Card title="Minimal Code" icon="code">
+    85% less code compared to manual implementation
+  </Card>
+  <Card title="Type Safety" icon="shield-check">
+    Full TypeScript support with generics
+  </Card>
+  <Card title="Auto-Refresh" icon="arrows-rotate">
+    React hooks auto-refresh credits
+  </Card>
+  <Card title="Error Handling" icon="triangle-exclamation">
+    Built-in error handling and validation
+  </Card>
+</CardGroup>
+
+## Running the Application
+
+### Development
+
+```bash
+npm run dev
+```
+
+Visit `http://localhost:3000`
+
+### Testing the Flow
+
+1. **Sign In**
+   - Click "Sign In with ARES"
+   - Authorize the app in ARES
+   - Redirect back to app
+
+2. **View Credits**
+   - Navigate to Dashboard
+   - See your ARES credit balance
+
+3. **Use Services**
+   - Click on a service button
+   - Credits are deducted
+   - Balance updates
+
+## Production Deployment
+
+### Vercel Deployment
+
+1. Push code to GitHub
+2. Connect to Vercel
+3. Add environment variables in Vercel dashboard
+4. Deploy
+
+```bash
+vercel --prod
+```
+
+### Environment Variables (Production)
+
+Update callback URLs in Clerk dashboard:
+- `https://yourdomain.com/api/auth/callback`
+
+## Testing
+
+### Unit Tests
+
+```typescript __tests__/api/ares.test.ts
+import { describe, it, expect, vi } from 'vitest';
+import { GET } from '@/app/api/ares/user/route';
+
+vi.mock('@clerk/nextjs/server');
+vi.mock('ares-sdk/lib/clerk');
+
+describe('ARES User API', () => {
+  it('returns user data when authenticated', async () => {
+    // Test implementation
+  });
+
+  it('returns 401 when not authenticated', async () => {
+    // Test implementation
+  });
+});
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="ARES not connected error">
+    - Verify ARES OAuth provider is configured in Clerk dashboard
+    - Check provider key is `custom_ares`
+    - Ensure user completed OAuth flow
+    - Confirm OAuth URLs are correct (see Clerk setup guide)
+  </Accordion>
+
+  <Accordion title="Insufficient credits">
+    - User needs to add credits to ARES account
+    - Check credit cost is accurate
+    - Verify credits weren't already deducted
+  </Accordion>
+
+  <Accordion title="Token errors">
+    - Clear cookies and re-authenticate
+    - Check Clerk configuration
+    - Verify environment variables
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Node.js Example"
+    icon="node"
+    href="/examples/node"
+  >
+    See Express.js backend example
+  </Card>
+
+  <Card
+    title="API Routes"
+    icon="code"
+    href="/examples/api-routes"
+  >
+    More API route patterns
+  </Card>
+
+  <Card
+    title="Error Handling"
+    icon="triangle-exclamation"
+    href="/sdk/error-handling"
+  >
+    Comprehensive error handling
+  </Card>
+
+  <Card
+    title="GitHub"
+    icon="github"
+    href="https://github.com/Pantheon-Technologies-Inc/ares-typescript"
+  >
+    View SDK source
+  </Card>
+</CardGroup>

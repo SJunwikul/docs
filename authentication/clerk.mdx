@@ -1,0 +1,561 @@
+---
+title: "Clerk Integration"
+description: "Complete guide to integrating ARES with Clerk authentication"
+---
+
+## Overview
+
+Clerk provides the easiest way to integrate "Sign in with ARES" into your application. This guide covers:
+
+- Setting up Clerk in your project
+- Configuring ARES as a custom OAuth provider
+- Using the ARES SDK with Clerk
+- Complete Next.js examples
+
+<Note>
+  **Prerequisites**: You need an ARES Partner Client ID and Secret. Contact
+  admin@joinares.com to become a partner.
+</Note>
+
+## Why Clerk?
+
+<CardGroup cols={2}>
+  <Card title="One-Line Setup" icon="bolt">
+    SDK helper functions make integration trivial
+  </Card>
+  <Card title="Automatic Token Management" icon="rotate">
+    Clerk handles token refresh and expiration
+  </Card>
+  <Card title="Built-In UI Components" icon="palette">
+    Pre-built sign-in buttons and user profiles
+  </Card>
+  <Card title="Production Ready" icon="shield-check">
+    Secure, scalable, and maintained
+  </Card>
+</CardGroup>
+
+## Step 1: Install Dependencies
+
+Install Clerk and the ARES SDK:
+
+<CodeGroup>
+
+```bash npm
+npm install @clerk/nextjs ares-sdk
+```
+
+```bash yarn
+yarn add @clerk/nextjs ares-sdk
+```
+
+```bash pnpm
+pnpm add @clerk/nextjs ares-sdk
+```
+
+</CodeGroup>
+
+## Step 2: Set Up Clerk
+
+Follow [Clerk's official quickstart guide](https://clerk.com/docs/getting-started/quickstart/overview) to set up Clerk in your Next.js application.
+
+## Step 3: Configure ARES as OAuth Provider in Clerk
+
+After completing the Clerk setup, add your ARES Partner credentials to `.env.local`:
+
+```bash .env.local
+# ARES Partner Credentials
+ARES_CLIENT_ID=your_partner_client_id
+ARES_CLIENT_SECRET=your_partner_client_secret
+```
+
+### Add Custom OAuth Provider
+
+1. Go to your Clerk Dashboard
+2. Navigate to **Configure** → **SSO Connections**
+3. Click **Add connection** → **For all users**
+4. Choose **Custom prodiver** → **Use manual configuration**
+5. Use these exact settings:
+
+| Setting               | Value                                      |
+| --------------------- | ------------------------------------------ |
+| **Name**              | ARES                                       |
+| **Key**               | `ares` (will show up as oauth_custom_ares) |
+| **Authorization URL** | `https://joinares.com/oauth`               |
+| **Token URL**         | `https://oauth.joinares.com/oauth/token`   |
+| **User info URL**     | `https://oauth.joinares.com/v1/user`       |
+| **Client ID**         | Your ARES Partner Client ID                |
+| **Client Secret**     | Your ARES Partner Client Secret            |
+
+{" "}
+
+<Warning>
+  **NOTE**: You'll have to re-enter Client ID and Client Secret if you're
+  working in a development Clerk instance and deploy a production Clerk instance
+  later.
+</Warning>
+
+6. Click **Add connection**
+
+### Logo
+
+Download the ARES logo to add to your custom ARES OAuth:
+
+<img
+  src="/images/ARES-logo.png"
+  alt="ARES Logo"
+  style={{ maxWidth: "150px", margin: "20px 0" }}
+/>
+
+<a href="/images/ARES-logo.png" download="ARES-logo.png">
+  <button
+    style={{
+      padding: "10px 20px",
+      backgroundColor: "#4F46E5",
+      color: "white",
+      border: "none",
+      borderRadius: "6px",
+      cursor: "pointer",
+      fontSize: "14px",
+      fontWeight: "500",
+    }}
+  >
+    Download full size
+  </button>
+</a>
+
+### Attribute Mapping
+
+Configure these attribute mappings:
+
+- **User ID** → `id`
+- **Avatar URL** → `picture`
+- **Full name** → `name`
+- **First name** → `name`
+- **Email address** → `email`
+- **Email address verified** → `True`
+
+### Register Redirect URI
+
+1. Copy the **Authorized redirect URI** from your Clerk configuration (ends in .../v1/oauth_callback)
+2. Email it to **admin@joinares.com** along with your Client ID
+3. **Do NOT enable the connection** until you receive confirmation from ARES (it won't work)
+
+### Enable the Connection
+
+After ARES confirms your redirect URI via email, enable the ARES OAuth connection in your Clerk dashboard.
+
+## Step 4: Add Sign-In UI
+
+Follow [Clerk's documentation on adding sign-in](https://clerk.com/docs/references/nextjs/overview) to set up authentication UI in your app.
+
+Once configured, the Clerk `<SignIn />` component will automatically show "Continue with ARES" as an option. To use ARES programmatically, use the OAuth strategy `oauth_custom_ares`.
+
+## Step 5: Create API Routes with ARES SDK
+
+<Note>
+  The examples below use **Next.js App Router**. For other frameworks, see [Node.js examples](/examples/node) or [API Routes guide](/examples/api-routes).
+</Note>
+
+### Using the Clerk Helper Function
+
+The ARES SDK includes a `createAresFromClerkAuth()` helper that makes integration seamless:
+
+```typescript app/api/ares/user/route.ts
+import { auth } from "@clerk/nextjs/server";
+import { clerkClient } from "@clerk/nextjs/server";
+import { createAresFromClerkAuth } from "ares-sdk/lib/clerk";
+
+export async function GET() {
+  // Create ARES client from Clerk authentication
+  const aresClient = await createAresFromClerkAuth(auth(), {
+    clerkClient: clerkClient(),
+  });
+
+  if (!aresClient) {
+    return Response.json(
+      { error: "Not authenticated with ARES" },
+      { status: 401 }
+    );
+  }
+
+  // Retrieve user information from ARES
+  const user = await aresClient.user.retrieve();
+
+  return Response.json({
+    name: user.name,
+    email: user.email,
+    credits: user.credits,
+    avatar: user.picture,
+  });
+}
+```
+
+### Record Usage Example
+
+Create an API route to deduct credits:
+
+```typescript app/api/ares/usage/route.ts
+import { auth } from "@clerk/nextjs/server";
+import { clerkClient } from "@clerk/nextjs/server";
+import { createAresFromClerkAuth } from "ares-sdk/lib/clerk";
+
+export async function POST(request: Request) {
+  const aresClient = await createAresFromClerkAuth(auth(), {
+    clerkClient: clerkClient(),
+  });
+
+  if (!aresClient) {
+    return Response.json(
+      { error: "Not authenticated with ARES" },
+      { status: 401 }
+    );
+  }
+
+  const { usage, credits } = await request.json();
+
+  try {
+    const result = await aresClient.partner.recordUsage({
+      client_id: process.env.ARES_CLIENT_ID!,
+      credits: credits,
+      usage: usage,
+    });
+
+    return Response.json({
+      success: true,
+      creditsDeducted: result.usage.credits_earned,
+      timestamp: result.usage.usage_timestamp,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("402")) {
+      return Response.json({ error: "Insufficient credits" }, { status: 402 });
+    }
+    throw error;
+  }
+}
+```
+
+## SDK Helper Functions Reference
+
+The ARES SDK provides several Clerk-specific helper functions:
+
+### `createAresFromClerkAuth(authResult, config)`
+
+Creates an ARES client from Clerk's `auth()` result. Returns `null` if user is not authenticated.
+
+```typescript
+const aresClient = await createAresFromClerkAuth(auth(), {
+  clerkClient: clerkClient(),
+  provider: "custom_ares", // optional, defaults to 'custom_ares'
+});
+```
+
+### `createAresFromClerk(userId, config)`
+
+Creates an ARES client from a Clerk user ID.
+
+```typescript
+const aresClient = await createAresFromClerk("user_123", {
+  clerkClient: clerkClient(),
+  provider: "custom_ares",
+});
+```
+
+### `hasAresConnection(userId, config)`
+
+Checks if a user has connected their ARES account.
+
+```typescript
+const isConnected = await hasAresConnection(userId, {
+  clerkClient: clerkClient(),
+  provider: "custom_ares",
+});
+
+if (!isConnected) {
+  // Prompt user to connect ARES account
+}
+```
+
+### `getAresTokenFromClerk(userId, config)`
+
+Retrieves the raw OAuth access token with detailed error information.
+
+```typescript
+const result = await getAresTokenFromClerk(userId, {
+  clerkClient: clerkClient(),
+  provider: "custom_ares",
+});
+
+if (result.success) {
+  console.log("Token:", result.token);
+} else {
+  console.error("Error:", result.error);
+}
+```
+
+## Client-Side Integration
+
+<Note>
+  The examples below use **React**. The Clerk helper functions work with any Node.js framework, but these client-side examples are React-specific.
+</Note>
+
+### Check if User Has ARES Connected
+
+Create a client component to check ARES connection status:
+
+```typescript components/AresStatus.tsx
+"use client";
+
+import { useUser } from "@clerk/nextjs";
+import { useEffect, useState } from "react";
+
+export function AresStatus() {
+  const { user } = useUser();
+  const [aresData, setAresData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchAresData() {
+      try {
+        const response = await fetch("/api/ares/user");
+        if (response.ok) {
+          const data = await response.json();
+          setAresData(data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch ARES data:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    if (user) {
+      fetchAresData();
+    }
+  }, [user]);
+
+  if (loading) return <div>Loading...</div>;
+
+  if (!aresData) {
+    return (
+      <div className="rounded-md border border-yellow-500 bg-yellow-50 p-4">
+        <p className="text-yellow-800">
+          Please connect your ARES account to continue.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-green-500 bg-green-50 p-4">
+      <p className="font-semibold">{aresData.name}</p>
+      <p className="text-sm text-gray-600">{aresData.email}</p>
+      <p className="mt-2 text-lg font-bold">Credits: {aresData.credits}</p>
+    </div>
+  );
+}
+```
+
+### Display Credits Before Deduction
+
+```typescript components/ServiceButton.tsx
+"use client";
+
+import { useState } from "react";
+
+export function ServiceButton({
+  cost,
+  serviceName,
+}: {
+  cost: number;
+  serviceName: string;
+}) {
+  const [loading, setLoading] = useState(false);
+
+  const handleService = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/ares/usage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          usage: serviceName,
+          credits: cost,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        if (response.status === 402) {
+          alert(
+            "Insufficient credits. Please add more credits to your ARES account."
+          );
+          return;
+        }
+        throw new Error(error.message);
+      }
+
+      const result = await response.json();
+      alert(`Success! ${result.creditsDeducted} credits deducted.`);
+    } catch (error) {
+      alert("Failed to process service");
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleService}
+      disabled={loading}
+      className="rounded-md bg-blue-600 px-4 py-2 text-white disabled:opacity-50"
+    >
+      {loading ? "Processing..." : `${serviceName} (${cost} credits)`}
+    </button>
+  );
+}
+```
+
+## Error Handling
+
+Handle common errors when working with Clerk and ARES:
+
+```typescript
+import { createAresFromClerkAuth } from "ares-sdk/lib/clerk";
+import { clerkClient } from "@clerk/nextjs/server";
+import { auth } from "@clerk/nextjs/server";
+
+export async function GET() {
+  try {
+    const aresClient = await createAresFromClerkAuth(auth(), {
+      clerkClient: clerkClient(),
+    });
+
+    if (!aresClient) {
+      return Response.json(
+        {
+          error: "ARES not connected",
+          message: "Please sign in with ARES first",
+        },
+        { status: 401 }
+      );
+    }
+
+    const user = await aresClient.user.retrieve();
+    return Response.json(user);
+  } catch (error: any) {
+    // Handle specific ARES errors
+    if (error.status === 401) {
+      return Response.json({ error: "Invalid ARES token" }, { status: 401 });
+    }
+
+    if (error.status === 403) {
+      return Response.json({ error: "ARES token expired" }, { status: 403 });
+    }
+
+    // Generic error
+    return Response.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+```
+
+## Using with Supabase
+
+If you're using Supabase for your database but want to use ARES OAuth, you can use Clerk as a third-party auth provider:
+
+<Steps>
+  <Step title="Set up Clerk with ARES">
+    Follow the Clerk integration steps above
+  </Step>
+  <Step title="Connect Supabase to Clerk">
+    Use Clerk's JWT templates to create tokens for Supabase
+  </Step>
+  <Step title="Use both systems">
+    - Clerk handles ARES OAuth authentication - Supabase handles your
+    application data - ARES SDK uses Clerk tokens for API calls
+  </Step>
+</Steps>
+
+See [Clerk's Supabase integration guide](https://clerk.com/docs/integrations/databases/supabase) for detailed instructions.
+
+## Testing Your Integration
+
+### 1. Test OAuth Flow
+
+1. Start your Next.js app: `npm run dev`
+2. Navigate to `/sign-in`
+3. Click "Continue with ARES"
+4. Authorize the app in ARES
+5. Verify redirect back to your app
+
+### 2. Test API Routes
+
+```bash
+# Get user data (requires authentication)
+curl http://localhost:3000/api/ares/user
+
+# Record usage
+curl -X POST http://localhost:3000/api/ares/usage \
+  -H "Content-Type: application/json" \
+  -d '{"usage": "Test service", "credits": 5}'
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="No ARES OAuth token found" icon="circle-exclamation">
+    **Possible causes:**
+    - User hasn't connected ARES account yet
+    - OAuth provider key mismatch
+    - Redirect URI not confirmed by ARES
+
+    **Solution:**
+    - Verify provider key is exactly `custom_ares` in Clerk dashboard
+    - Ensure user completed OAuth flow
+    - Check that ARES connection is enabled in Clerk
+    - Confirm you received email approval from admin@joinares.com
+
+  </Accordion>
+
+  <Accordion title="401 Unauthorized errors" icon="lock">
+    **Possible causes:**
+    - Invalid or expired token
+    - Token not being sent correctly
+
+    **Solution:**
+    - Check that `createAresFromClerkAuth` is being called correctly
+    - Verify OAuth provider is configured properly in Clerk
+    - Ensure user is authenticated with Clerk
+
+  </Accordion>
+
+  <Accordion title="Client ID mismatch" icon="id-card">
+    **Error:** Client ID in token doesn't match request
+
+    **Solution:**
+    - Verify `ARES_CLIENT_ID` environment variable matches your partner credentials
+    - Check that you're using the correct Client ID in both Clerk OAuth config and API calls
+
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="SDK Usage Guide" icon="code" href="/sdk/basic-usage">
+    Learn all SDK features and options
+  </Card>
+  <Card title="Complete Example App" icon="rocket" href="/examples/nextjs">
+    See a full Next.js + Clerk + ARES app
+  </Card>
+  <Card
+    title="Error Handling"
+    icon="triangle-exclamation"
+    href="/sdk/error-handling"
+  >
+    Handle errors gracefully
+  </Card>
+  <Card title="API Reference" icon="book" href="/api-reference/introduction">
+    Explore all API endpoints
+  </Card>
+</CardGroup>

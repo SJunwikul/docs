@@ -1,97 +1,169 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Welcome to ARES"
+description: "Integrate ARES cross-app credit wallet into your AI application and earn revenue from pay-per-use alongside your existing subscription model"
 ---
 
-## Setting up
+## What is ARES?
 
-Get your documentation site up and running in minutes.
+**ARES** is a cross-app credit wallet that enables your AI application to tap into a new revenue stream. By integrating ARES, you can accept payments from users who prefer pay-per-use credits instead of (or alongside) traditional subscriptions, earning revenue every time ARES users consume your services.
 
 <Card
-  title="Start here"
+  title="Get started in minutes"
   icon="rocket"
   href="/quickstart"
   horizontal
 >
-  Follow our three step quickstart guide.
+  Install the SDK and make your first API call
 </Card>
 
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
+## Key Benefits for Your App
 
 <Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+  <Card title="Additional Revenue Stream" icon="coins">
+    Earn from ARES users who spend credits in your app - a new income source
+    alongside subscriptions
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="OAuth 2.0 Integration" icon="shield-check">
+    Simple "Sign in with ARES" - Users authenticate and you automatically track
+    usage
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Pay-Per-Use Model" icon="chart-line">
+    Perfect for users who want flexibility - charge per API call, generation, or
+    feature used
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Easy Integration" icon="code">
+    Auto-generated TypeScript SDK with full Node.js, Deno, and Bun support
   </Card>
 </Columns>
 
-## Create beautiful pages
+## How It Works
 
-Everything you need to create world-class documentation.
+Integrate ARES to accept credit-based payments from a growing user base:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+1. **User signs in with ARES** - Your app redirects to ARES for authentication (like "Sign in with Google")
+2. **User authorizes your app** - Grants permission to spend their ARES credits in your app
+3. **Receive OAuth token** - ARES redirects back with an authorization code
+4. **Provide your service** - User accesses your AI features, generations, or API calls
+5. **Deduct credits & earn revenue** - Use the SDK to track usage and deduct credits from the user's ARES wallet
+6. **Get paid** - ARES pays you $0.0018 per credit spent by ARES users.
+
+**You earn revenue every time an ARES user consumes your services.**
+
+## Quick Example
+
+```typescript
+import { Ares } from "ares-sdk";
+
+// Initialize with user's OAuth access token
+const client = new Ares({
+  accessToken: userOAuthAccessToken,
+});
+
+// Check if user has enough credits before providing service
+const user = await client.user.retrieve();
+console.log(`${user.name} has ${user.credits} credits`);
+
+// Provide your AI service (generation, API call, etc.)
+const result = await yourAIService();
+
+// Deduct credits from user's ARES wallet - YOU get paid!
+await client.partner.recordUsage({
+  client_id: process.env.ARES_CLIENT_ID!,
+  credits: 10,
+  usage: "AI image generation",
+});
+```
+
+## Integration Options
+
+<Columns cols={3}>
+  <Card title="Clerk Integration" icon="clerk" href="/authentication/clerk">
+    Seamless OAuth with Clerk - one-line setup
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Auth0 Integration" icon="lock" href="/authentication/auth0">
+    Enterprise OAuth with Auth0 (Coming Soon)
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="Custom OAuth" icon="wrench" href="/authentication/custom-oauth">
+    Build your own OAuth integration
   </Card>
 </Columns>
 
-## Need inspiration?
+## Core Concepts
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<AccordionGroup>
+  <Accordion title="Partner Revenue Model" icon="coins">
+    You earn revenue every time an ARES user spends credits in your app. When you call `recordUsage()`, credits are deducted from the user's ARES wallet and you receive payment for the service provided.
+  </Accordion>
+
+{" "}
+<Accordion title="OAuth Access Tokens" icon="key">
+  Users authenticate via "Sign in with ARES" (OAuth 2.0). The access token
+  represents their ARES account and allows you to check their credit balance and
+  deduct credits when they use your services.
+</Accordion>
+
+{" "}
+<Accordion title="Partner Client ID" icon="id-card">
+  When you register as an ARES partner, you receive a Client ID and Client
+  Secret. These identify your application and enable you to receive revenue from
+  ARES users.
+</Accordion>
+
+{" "}
+<Accordion title="Flexible Pricing" icon="chart-line">
+  You control your pricing - charge per API call, per generation, per feature,
+  or any model that fits your app. ARES handles the credit transactions.
+</Accordion>
+
+  <Accordion title="Server-Side Only" icon="server">
+    For security, all ARES SDK operations must be performed server-side. Never expose OAuth tokens or Client Secrets in client-side code.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<Steps>
+  <Step title="Install the SDK">
+    Get started by installing the TypeScript SDK via npm
+
+    ```bash
+    npm install ares-sdk
+    ```
+
+  </Step>
+
+  <Step title="Set up OAuth">
+    Configure "Sign in with ARES" using Clerk or your preferred OAuth provider
+
+    [Authentication Guide](/authentication/overview)
+
+  </Step>
+
+  <Step title="Make your first call">
+    Initialize the client and retrieve user information
+
+    [Quickstart Guide](/quickstart)
+
+  </Step>
+</Steps>
+
+## Resources
+
+<CardGroup cols={2}>
+  <Card title="API Reference" icon="book" href="/api-reference/introduction">
+    Complete API documentation with examples
+  </Card>
+  <Card title="TypeScript SDK" icon="code" href="/sdk/installation">
+    SDK installation and usage guide
+  </Card>
+  <Card
+    title="GitHub Repository"
+    icon="github"
+    href="https://github.com/Pantheon-Technologies-Inc/ares-typescript"
+  >
+    View source code and contribute
+  </Card>
+  <Card title="ARES Platform" icon="globe" href="https://joinares.com">
+    Visit the ARES platform
+  </Card>
+</CardGroup>

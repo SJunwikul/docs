@@ -1,33 +1,160 @@
 ---
-title: 'Introduction'
-description: 'Example section for showcasing API endpoints'
+title: "API Reference"
+description: "Complete reference for the ARES REST API"
 ---
 
-<Note>
-  If you're not looking to build API reference documentation, you can delete
-  this section by removing the api-reference folder.
-</Note>
+## Overview
 
-## Welcome
+The ARES REST API provides programmatic access to user profiles and partner usage tracking. All API calls are made on behalf of authenticated users via OAuth 2.0 access tokens.
 
-There are two ways to build API documentation: [OpenAPI](https://mintlify.com/docs/api-playground/openapi/setup) and [MDX components](https://mintlify.com/docs/api-playground/mdx/configuration). For the starter kit, we are using the following OpenAPI specification.
+**Base URL:** `https://oauth.joinares.com`
 
-<Card
-  title="Plant Store Endpoints"
-  icon="leaf"
-  href="https://github.com/mintlify/starter/blob/main/api-reference/openapi.json"
->
-  View the OpenAPI specification file
-</Card>
+## Available Endpoints
+
+The ARES API currently provides two core endpoints:
+
+<CardGroup cols={2}>
+  <Card
+    title="GET /v1/user"
+    icon="user"
+    href="/api-reference/user"
+  >
+    Retrieve authenticated user's profile and credit balance
+  </Card>
+
+  <Card
+    title="POST /v1/partner/usage"
+    icon="coins"
+    href="/api-reference/partner-usage"
+  >
+    Record usage and deduct credits from user's account
+  </Card>
+</CardGroup>
 
 ## Authentication
 
-All API endpoints are authenticated using Bearer tokens and picked up from the specification file.
+All API endpoints require **OAuth 2.0 Bearer token authentication**. Include the access token in the Authorization header:
 
-```json
-"security": [
-  {
-    "bearerAuth": []
-  }
-]
+```http
+Authorization: Bearer YOUR_OAUTH_ACCESS_TOKEN
 ```
+
+The access token represents a specific user's ARES account and is obtained through the "Sign in with ARES" OAuth flow.
+
+### Getting an Access Token
+
+See the [Authentication Guide](/authentication/overview) for details on obtaining access tokens via:
+
+- [Clerk](/authentication/clerk) (recommended)
+- [Auth0](/authentication/auth0)
+- [Custom OAuth](/authentication/custom-oauth)
+
+<Warning>
+  Access tokens must never be exposed in client-side code. All API calls should
+  be made server-side.
+</Warning>
+
+## Using the SDK
+
+We recommend using the [ARES TypeScript SDK](/sdk/installation) instead of making raw HTTP requests:
+
+```typescript
+import { Ares } from "ares-sdk";
+
+const client = new Ares({
+  accessToken: "user_oauth_access_token", //NOTE: this is specific to each user
+});
+
+// Get user
+const user = await client.user.retrieve();
+
+// Record usage
+await client.partner.recordUsage({
+  client_id: process.env.ARES_CLIENT_ID!,
+  credits: 10,
+  usage: "Service description",
+});
+```
+
+## Rate Limiting
+
+API endpoints are rate-limited to prevent abuse. If you exceed the rate limit, you'll receive a `429 Too Many Requests` response.
+
+Current rate limits:
+
+- **100 requests per minute** per user
+
+<Note>
+  Rate limits are subject to change. Check response headers for current limits.
+</Note>
+
+## Error Handling
+
+The API uses standard HTTP status codes:
+
+| Status Code | Meaning                                 |
+| ----------- | --------------------------------------- |
+| 200         | Success                                 |
+| 400         | Bad Request - Invalid parameters        |
+| 401         | Unauthorized - Invalid or missing token |
+| 402         | Payment Required - Insufficient credits |
+| 403         | Forbidden - Token expired               |
+| 404         | Not Found                               |
+| 429         | Too Many Requests - Rate limit exceeded |
+| 500         | Internal Server Error                   |
+
+See the [Error Handling Guide](/sdk/error-handling) for details on handling errors with the SDK.
+
+## OpenAPI Specification
+
+The complete OpenAPI specification is available:
+
+<Card
+  title="OpenAPI Specification"
+  icon="file-code"
+  href="https://app.stainless.com/api/spec/documented/ares/openapi.documented.yml"
+>
+  View the full OpenAPI 3.0 specification
+</Card>
+
+## Versioning
+
+The current API version is **v1**. All endpoints are prefixed with `/v1/`.
+
+Future versions will be introduced with new prefixes (e.g., `/v2/`) to maintain backward compatibility.
+
+## Support
+
+<CardGroup cols={2}>
+  <Card
+    title="SDK Documentation"
+    icon="code"
+    href="/sdk/basic-usage"
+  >
+    Learn how to use the TypeScript SDK
+  </Card>
+
+{" "}
+
+<Card
+  title="GitHub Issues"
+  icon="github"
+  href="https://github.com/Pantheon-Technologies-Inc/ares-typescript/issues"
+>
+  Report bugs or request features
+</Card>
+
+{" "}
+
+<Card title="Authentication Guide" icon="key" href="/authentication/overview">
+  Set up OAuth authentication
+</Card>
+
+  <Card
+    title="Examples"
+    icon="book-open"
+    href="/examples/nextjs"
+  >
+    View complete working examples
+  </Card>
+</CardGroup>

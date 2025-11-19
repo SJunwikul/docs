@@ -1,0 +1,859 @@
+---
+title: "SDK Helpers"
+description: "Ready-to-use helper functions for common ARES integration patterns"
+---
+
+## Overview
+
+The ARES SDK v0.3.0+ includes powerful helper functions that dramatically simplify integration. These helpers handle authentication, credit management, error handling, and more automatically.
+
+<Note>
+  **New in v0.3.0**: These helpers reduce integration code by up to 50% compared to manual implementation.
+</Note>
+
+## Server-Side Helpers
+
+### createAresRoutes()
+
+Creates complete GET/POST API route handlers with **one line of code**.
+
+```typescript
+// app/api/ares/route.ts
+import { createAresRoutes } from 'ares-sdk/lib/api-routes';
+
+export const { GET, POST } = createAresRoutes();
+```
+
+**What it creates:**
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/ares` | GET | Returns user's ARES profile and credit balance |
+| `/api/ares` | POST | Records usage and deducts credits |
+
+**GET Response:**
+```json
+{
+  "success": true,
+  "user": {
+    "id": "usr_123",
+    "name": "John Doe",
+    "email": "john@example.com",
+    "credits": 150,
+    "picture": "https://..."
+  }
+}
+```
+
+**POST Request:**
+```json
+{
+  "credits": 50,
+  "usage": "Generated AI content"
+}
+```
+
+**POST Response:**
+```json
+{
+  "success": true,
+  "message": "Usage recorded successfully",
+  "usage": {
+    "credits_deducted": 50,
+    "remaining_credits": 100,
+    "usage_description": "Generated AI content",
+    "timestamp": "2025-01-15T10:30:00Z"
+  }
+}
+```
+
+**Configuration Options:**
+
+```typescript
+createAresRoutes({
+  clientId: 'custom-client-id', // Override ARES_CLIENT_ID env var
+  provider: 'custom_ares',      // Override OAuth provider name (default: "custom_ares")
+});
+```
+
+**Custom Wrapper Example:**
+
+```typescript
+import { createAresRoutes } from 'ares-sdk/lib/api-routes';
+import { pricing } from '@/lib/pricing-config';
+
+const { GET: getAresUser, POST } = createAresRoutes();
+
+// Wrap GET to add app-specific data
+export async function GET() {
+  const response = await getAresUser();
+  if (!response.ok) return response;
+
+  const data = await response.json();
+  return Response.json({
+    ...data,
+    pricing: pricing.getSummary(), // Add pricing info
+  });
+}
+
+export { POST };
+```
+
+---
+
+### withCreditsCheck()
+
+Middleware that protects API routes by automatically checking and deducting credits **before** your code runs.
+
+**Key Features (v0.3.0+):**
+- ✅ Auto-parses request body (no more `request.clone()` needed!)
+- ✅ Type-safe with TypeScript generics
+- ✅ Automatic credit checking and deduction
+- ✅ Returns 402 error if insufficient credits
+- ✅ Passes parsed body to your handler
+
+#### Fixed Credit Cost
+
+```typescript
+// app/api/generate-content/route.ts
+import { withCreditsCheck } from 'ares-sdk/lib/api-routes';
+
+export const POST = withCreditsCheck(
+  {
+    credits: 100, // Fixed cost
+    usage: 'AI content generation',
+  },
+  async (request, { user, body }) => {
+    // Credits already deducted! ✅
+    const result = await generateContent(body);
+
+    return Response.json({
+      success: true,
+      result,
+      credits_remaining: user.credits,
+    });
+  }
+);
+```
+
+#### Variable Credit Cost
+
+```typescript
+interface GenerateRequest {
+  prompt: string;
+  quantity: number;
+  mode: 'draft' | 'standard';
+}
+
+export const POST = withCreditsCheck<GenerateRequest>(
+  {
+    // Calculate credits from parsed body - SDK handles parsing!
+    credits: (body) => {
+      const basePrice = body.mode === 'draft' ? 10 : 50;
+      return basePrice * body.quantity;
+    },
+    usage: 'AI generation',
+  },
+  async (request, { user, body }) => {
+    // Body is already parsed with full type safety! ✅
+    const result = await generate(body.prompt, body.quantity, body.mode);
+
+    return Response.json({ result });
+  }
+);
+```
+
+**Before v0.3.0 (Manual Cloning):**
+```typescript
+// ❌ Old pattern - required manual request cloning
+credits: async (request) => {
+  const cloned = request.clone(); // Manual clone needed
+  const body = await cloned.json();
+  return body.quantity * 10;
+}
+```
+
+**After v0.3.0 (Automatic Parsing):**
+```typescript
+// ✅ New pattern - SDK handles parsing automatically
+credits: (body) => body.quantity * 10
+```
+
+#### Dynamic Usage Description
+
+```typescript
+withCreditsCheck(
+  {
+    credits: (body) => body.quantity * 10,
+    usage: (body) => `Generated ${body.quantity} items in ${body.mode} mode`,
+  },
+  async (request, { user, body }) => {
+    // ...
+  }
+);
+```
+
+#### Configuration Options
+
+```typescript
+withCreditsCheck(
+  {
+    clientId: 'custom-client-id', // Override ARES_CLIENT_ID env var
+    provider: 'custom_ares',      // Override OAuth provider name
+    credits: 100,                 // Credits to require
+    usage: 'Description',         // Usage description
+  },
+  handler
+);
+```
+
+#### Handler Context
+
+The handler receives:
+
+```typescript
+async (request, context) => {
+  // context.client - Authenticated ARES client
+  // context.user - User's ARES profile
+  // context.body - Parsed request body (typed if you use generics)
+}
+```
+
+---
+
+### withCreditsDeduction()
+
+Lower-level helper for server functions, background jobs, webhooks, and non-route contexts. Provides more control than `withCreditsCheck()`.
+
+```typescript
+import { withCreditsDeduction } from 'ares-sdk/lib/server-helpers';
+import { Ares } from 'ares-sdk';
+
+export async function POST(request: Request) {
+  const accessToken = await getAresToken();
+  const client = new Ares({ accessToken });
+
+  const result = await withCreditsDeduction(
+    client,
+    {
+      clientId: process.env.ARES_CLIENT_ID!,
+      credits: 50,
+      usage: 'Background job processing',
+    },
+    async () => {
+      // Your operation here
+      return await processBackgroundJob();
+    }
+  );
+
+  if (!result.success) {
+    const statusCode = result.errorType === 'INSUFFICIENT_CREDITS' ? 402 : 500;
+    return Response.json(
+      { error: result.error, type: result.errorType },
+      { status: statusCode }
+    );
+  }
+
+  return Response.json({
+    success: true,
+    data: result.data,
+    credits_remaining: result.remainingCredits,
+  });
+}
+```
+
+**Advanced Features:**
+
+```typescript
+withCreditsDeduction(
+  client,
+  {
+    clientId: env.ARES_CLIENT_ID,
+    credits: 100,
+    usage: 'Unreliable operation',
+    retries: 3,        // Retry up to 3 times on network failure
+    retryDelay: 2000,  // Wait 2s between retries
+    checkFirst: false, // Skip pre-flight check (reduces API calls)
+  },
+  operation
+);
+```
+
+**Result Object:**
+
+```typescript
+{
+  success: boolean;
+  data?: T;                    // Your operation result
+  error?: string;              // Error message if failed
+  errorType?: 'INSUFFICIENT_CREDITS' | 'OPERATION_FAILED' | 'AUTHENTICATION_ERROR' | 'UNKNOWN';
+  creditsDeducted: number;     // Credits that were deducted
+  remainingCredits: number;    // User's remaining balance
+  usage?: {
+    credits: number;
+    description: string;
+    timestamp?: string;
+  };
+}
+```
+
+**When to use:**
+- ✅ Background jobs / cron jobs
+- ✅ Webhook handlers
+- ✅ Server Actions (Next.js 13+)
+- ✅ Non-HTTP server functions
+- ✅ When you need retry logic
+
+---
+
+## Client-Side Helpers (React)
+
+### useAres()
+
+**Recommended:** Combined hook for both user data and usage recording with automatic refresh.
+
+```tsx
+'use client';
+import { useAres } from 'ares-sdk/lib/react';
+
+export function Dashboard() {
+  const { user, loading, error, recordUsage, recording } = useAres('/api/ares', {
+    refreshInterval: 300000,  // Refresh every 5 minutes
+    revalidateOnFocus: true,  // Refresh on window focus
+  });
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error}</div>;
+  if (!user) return null;
+
+  async function handleAction() {
+    const result = await recordUsage({
+      credits: 10,
+      usage: 'Performed action',
+    });
+
+    if (result.success) {
+      // User data automatically refreshed! ✅
+      console.log('Success!');
+    } else {
+      alert(result.error); // "Insufficient credits"
+    }
+  }
+
+  return (
+    <div>
+      <h1>Credits: {user.credits.toLocaleString()}</h1>
+      <button onClick={handleAction} disabled={recording}>
+        Use 10 Credits
+      </button>
+    </div>
+  );
+}
+```
+
+**Features:**
+- ✅ Auto-fetches user data on mount
+- ✅ Auto-refreshes periodically (configurable)
+- ✅ Auto-refreshes on window focus (configurable)
+- ✅ Auto-refreshes after recording usage
+- ✅ Built-in loading and error states
+- ✅ Full TypeScript support
+
+---
+
+### useAresUser()
+
+Fetch and monitor user data only (no usage recording).
+
+```tsx
+'use client';
+import { useAresUser } from 'ares-sdk/lib/react';
+
+export function CreditDisplay() {
+  const { user, loading, error, refresh } = useAresUser('/api/ares');
+
+  if (loading) return <Skeleton />;
+  if (error) return <Error />;
+
+  return (
+    <div>
+      <p>Credits: {user.credits}</p>
+      <button onClick={refresh}>Refresh</button>
+    </div>
+  );
+}
+```
+
+---
+
+### useRecordUsage()
+
+Record usage only (no user data fetching).
+
+```tsx
+'use client';
+import { useRecordUsage, useAresUser } from 'ares-sdk/lib/react';
+
+export function AIGenerator() {
+  const { user, refresh } = useAresUser();
+  const { recordUsage, recording } = useRecordUsage();
+
+  async function handleGenerate() {
+    const result = await recordUsage({
+      credits: 50,
+      usage: 'Generated AI content',
+    });
+
+    if (!result.success) {
+      alert(result.error);
+      return;
+    }
+
+    // Manually refresh user data
+    await refresh();
+  }
+
+  return (
+    <button onClick={handleGenerate} disabled={recording}>
+      {recording ? 'Processing...' : 'Generate (50 credits)'}
+    </button>
+  );
+}
+```
+
+<Tip>
+  Use the combined `useAres()` hook instead of separate hooks for simpler code and automatic refresh after usage recording.
+</Tip>
+
+---
+
+## Utility Helpers
+
+### createPricing()
+
+Create a centralized pricing configuration with helper methods.
+
+```typescript
+// lib/pricing-config.ts
+import { createPricing } from 'ares-sdk/lib/pricing';
+
+const PRICING_VALUES = {
+  IMAGE_GENERATION_DRAFT: 15,
+  IMAGE_GENERATION_STANDARD: 50,
+  VIDEO_GENERATION: 250,
+  IMAGE_UPSCALE_2X: 5,
+  IMAGE_UPSCALE_4X: 75,
+} as const;
+
+export type PricingAction = keyof typeof PRICING_VALUES;
+export const pricing = createPricing(PRICING_VALUES);
+
+// Usage:
+pricing.IMAGE_GENERATION_DRAFT          // 15
+pricing.get('IMAGE_GENERATION_STANDARD') // 50
+pricing.getSummary()                     // Array with formatted strings
+```
+
+**getSummary() output:**
+```typescript
+[
+  { action: 'IMAGE_GENERATION_DRAFT', credits: 15, formattedCredits: '15 credits' },
+  { action: 'IMAGE_GENERATION_STANDARD', credits: 50, formattedCredits: '50 credits' },
+  // ...
+]
+```
+
+**Usage in routes:**
+```typescript
+import { pricing } from '@/lib/pricing-config';
+
+withCreditsCheck(
+  {
+    credits: (body) => pricing.get('IMAGE_GENERATION_DRAFT') * body.quantity,
+    usage: 'Image generation',
+  },
+  handler
+);
+```
+
+---
+
+## Clerk Integration Helpers
+
+### createAresFromClerkAuth()
+
+Create an ARES client from Clerk's auth() result.
+
+```typescript
+import { createAresFromClerkAuth } from 'ares-sdk/lib/clerk';
+import { auth, clerkClient } from '@clerk/nextjs/server';
+
+export async function GET() {
+  const authResult = await auth();
+  const clerk = await clerkClient();
+
+  const client = await createAresFromClerkAuth(authResult, {
+    clerkClient: clerk,
+    provider: 'custom_ares', // Optional: override provider name
+  });
+
+  if (!client) {
+    return Response.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+
+  const user = await client.user.retrieve();
+  return Response.json({ user });
+}
+```
+
+---
+
+### createAresFromClerk()
+
+Create an ARES client from just a Clerk user ID.
+
+```typescript
+import { createAresFromClerk } from 'ares-sdk/lib/clerk';
+import { clerkClient } from '@clerk/nextjs/server';
+
+export async function processUserJob(userId: string) {
+  const client = await createAresFromClerk(userId, {
+    clerkClient: await clerkClient(),
+  });
+
+  if (!client) {
+    throw new Error('User not connected to ARES');
+  }
+
+  // Use client...
+}
+```
+
+---
+
+### hasAresConnection()
+
+Check if a user has connected their ARES account.
+
+```typescript
+import { hasAresConnection } from 'ares-sdk/lib/clerk';
+import { clerkClient } from '@clerk/nextjs/server';
+
+const isConnected = await hasAresConnection(userId, {
+  clerkClient: await clerkClient(),
+  provider: 'custom_ares',
+});
+
+if (!isConnected) {
+  return Response.json({ error: 'Please connect your ARES account' }, { status: 401 });
+}
+```
+
+---
+
+## Error Handling Helpers
+
+### handleAresError()
+
+Convert ARES errors to standardized error responses.
+
+```typescript
+import { handleAresError } from 'ares-sdk/lib/errors';
+
+try {
+  const user = await client.user.retrieve();
+} catch (error) {
+  const { error: message, statusCode, type } = handleAresError(error);
+  return Response.json({ error: message, type }, { status: statusCode });
+}
+```
+
+**Returns:**
+```typescript
+{
+  error: string;      // User-friendly error message
+  statusCode: number; // HTTP status code (401, 402, 500, etc.)
+  type: string;       // Error type for programmatic handling
+  details?: any;      // Additional error details
+}
+```
+
+---
+
+### isInsufficientCreditsError()
+
+Type guard for insufficient credits errors.
+
+```typescript
+import { isInsufficientCreditsError } from 'ares-sdk/lib/errors';
+
+try {
+  await client.partner.recordUsage({ ... });
+} catch (error) {
+  if (isInsufficientCreditsError(error)) {
+    // Show "buy credits" dialog
+    return showUpgradePrompt();
+  }
+  throw error;
+}
+```
+
+---
+
+### InsufficientCreditsError
+
+Custom error class for insufficient credits.
+
+```typescript
+import { InsufficientCreditsError, isInsufficientCredits } from 'ares-sdk/lib/server-helpers';
+
+if (user.credits < required) {
+  throw new InsufficientCreditsError(required, user.credits);
+}
+
+// Type guard
+try {
+  // ...
+} catch (error) {
+  if (isInsufficientCredits(error)) {
+    console.log(`Need ${error.required} credits, have ${error.current}`);
+  }
+}
+```
+
+---
+
+## Best Practices
+
+### Use the Right Helper
+
+| Use Case | Helper | Why |
+|----------|--------|-----|
+| API routes (Next.js) | `withCreditsCheck()` | Auto-parsed body, type safety |
+| Quick setup | `createAresRoutes()` | Full integration in 1 line |
+| Background jobs | `withCreditsDeduction()` | Retry logic, more control |
+| React components | `useAres()` | Auto-refresh, built-in states |
+| Pricing management | `createPricing()` | Centralized, formatted |
+
+### Type Safety
+
+Always use TypeScript generics for type-safe request bodies:
+
+```typescript
+interface MyRequest {
+  prompt: string;
+  quantity: number;
+}
+
+export const POST = withCreditsCheck<MyRequest>(
+  {
+    credits: (body) => body.quantity * 10, // body is typed!
+    usage: 'Generation',
+  },
+  async (request, { body }) => {
+    // body is typed as MyRequest! ✅
+    const result = await generate(body.prompt);
+    return Response.json({ result });
+  }
+);
+```
+
+### Centralize Pricing
+
+Create a single pricing configuration file:
+
+```typescript
+// lib/pricing-config.ts
+import { createPricing } from 'ares-sdk/lib/pricing';
+
+export const pricing = createPricing({
+  ACTION_1: 10,
+  ACTION_2: 50,
+  ACTION_3: 100,
+});
+
+// Use everywhere
+import { pricing } from '@/lib/pricing-config';
+```
+
+### Error Handling
+
+Use SDK error helpers for consistent error responses:
+
+```typescript
+import { handleAresError, isInsufficientCreditsError } from 'ares-sdk/lib/errors';
+
+try {
+  // ...
+} catch (error) {
+  if (isInsufficientCreditsError(error)) {
+    return showUpgradeDialog();
+  }
+
+  const errorResponse = handleAresError(error);
+  return Response.json(
+    { error: errorResponse.error },
+    { status: errorResponse.statusCode }
+  );
+}
+```
+
+---
+
+## Migration from Manual Implementation
+
+**Before (Manual):**
+```typescript
+// ~100 lines of code
+export async function POST(request: Request) {
+  const { userId } = await auth();
+  const clerk = await clerkClient();
+  const tokenResponse = await clerk.users.getUserOauthAccessToken(userId, 'custom_ares');
+  const token = tokenResponse.data[0]?.token;
+
+  if (!token) {
+    return Response.json({ error: 'Not connected' }, { status: 401 });
+  }
+
+  const client = new Ares({ accessToken: token });
+  const user = await client.user.retrieve();
+
+  const body = await request.json();
+  const { prompt, quantity } = body;
+
+  const creditCost = quantity * 10;
+
+  if (user.credits < creditCost) {
+    return Response.json({ error: 'Insufficient credits' }, { status: 402 });
+  }
+
+  await client.partner.recordUsage({
+    client_id: process.env.ARES_CLIENT_ID!,
+    credits: creditCost,
+    usage: 'Generation',
+  });
+
+  const result = await generate(prompt, quantity);
+  return Response.json({ result });
+}
+```
+
+**After (SDK Helpers):**
+```typescript
+// ~15 lines of code (85% reduction!)
+import { withCreditsCheck } from 'ares-sdk/lib/api-routes';
+
+interface Request { prompt: string; quantity: number; }
+
+export const POST = withCreditsCheck<Request>(
+  {
+    credits: (body) => body.quantity * 10,
+    usage: 'Generation',
+  },
+  async (request, { body }) => {
+    const result = await generate(body.prompt, body.quantity);
+    return Response.json({ result });
+  }
+);
+```
+
+**Code reduction: 85%** ✨
+
+---
+
+## Complete Example
+
+Here's a complete integration using all helpers:
+
+```typescript
+// app/api/ares/route.ts
+import { createAresRoutes } from 'ares-sdk/lib/api-routes';
+import { pricing } from '@/lib/pricing-config';
+
+const { GET: getAresUser, POST } = createAresRoutes();
+
+export async function GET() {
+  const response = await getAresUser();
+  if (!response.ok) return response;
+
+  const data = await response.json();
+  return Response.json({ ...data, pricing: pricing.getSummary() });
+}
+
+export { POST };
+```
+
+```typescript
+// app/api/generate/route.ts
+import { withCreditsCheck } from 'ares-sdk/lib/api-routes';
+import { pricing } from '@/lib/pricing-config';
+
+interface GenerateRequest {
+  prompt: string;
+  quantity: number;
+}
+
+export const POST = withCreditsCheck<GenerateRequest>(
+  {
+    credits: (body) => pricing.get('IMAGE_GENERATION_STANDARD') * body.quantity,
+    usage: (body) => `Generated ${body.quantity} images`,
+  },
+  async (request, { user, body }) => {
+    const result = await generateImages(body.prompt, body.quantity);
+    return Response.json({
+      success: true,
+      result,
+      credits_remaining: user.credits,
+    });
+  }
+);
+```
+
+```tsx
+// components/generator.tsx
+'use client';
+import { useAres } from 'ares-sdk/lib/react';
+
+export function Generator() {
+  const { user, loading, recordUsage, recording } = useAres('/api/ares');
+
+  if (loading || !user) return <Skeleton />;
+
+  return (
+    <div>
+      <h2>{user.credits} Credits</h2>
+      <button
+        onClick={async () => {
+          const result = await recordUsage({
+            credits: 50,
+            usage: 'Manual generation',
+          });
+          if (!result.success) alert(result.error);
+        }}
+        disabled={recording}
+      >
+        Generate (50 credits)
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Complete Examples" icon="book-open" href="/examples/nextjs">
+    Full production-ready examples from real apps
+  </Card>
+  <Card title="Error Handling" icon="triangle-exclamation" href="/sdk/error-handling">
+    Handle errors gracefully
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/introduction">
+    Detailed API documentation
+  </Card>
+  <Card title="Clerk Setup" icon="key" href="/authentication/clerk">
+    Complete Clerk integration guide
+  </Card>
+</CardGroup>

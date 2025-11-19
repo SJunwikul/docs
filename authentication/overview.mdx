@@ -1,0 +1,321 @@
+---
+title: "Authentication Overview"
+description: "Understanding OAuth 2.0 and Sign in with ARES"
+---
+
+## What is "Sign in with ARES"?
+
+ARES acts as an **OAuth 2.0 provider**, similar to "Sign in with Google" or "Sign in with GitHub". When users sign into your application with ARES, they authorize your app to access their ARES account on their behalf.
+
+This allows your application to:
+- Authenticate users via their ARES account
+- Access their ARES profile information
+- Check their credit balance
+- Deduct credits when providing services
+
+## How OAuth Works with ARES
+
+The OAuth 2.0 authorization flow follows these steps:
+
+<Steps>
+  <Step title="User initiates sign-in">
+    User clicks "Sign in with ARES" in your application
+  </Step>
+
+  <Step title="Redirect to ARES">
+    Your app redirects the user to ARES OAuth authorization endpoint with your partner credentials
+  </Step>
+
+  <Step title="User authorizes">
+    User logs into ARES (if not already logged in) and grants permission to your app
+  </Step>
+
+  <Step title="Authorization code returned">
+    ARES redirects back to your app with an authorization code
+  </Step>
+
+  <Step title="Exchange for access token">
+    Your server exchanges the authorization code for an OAuth access token
+  </Step>
+
+  <Step title="Use access token">
+    Your app uses the access token to make API calls on behalf of the user
+  </Step>
+</Steps>
+
+## Authentication vs Authorization
+
+<AccordionGroup>
+  <Accordion title="Authentication" icon="user-check">
+    **Who is the user?**
+
+    Authentication verifies the user's identity. When a user signs in with ARES, you know they have a valid ARES account.
+  </Accordion>
+
+  <Accordion title="Authorization" icon="key">
+    **What can they access?**
+
+    Authorization determines what your app can do on behalf of the user. The OAuth token grants your app permission to:
+    - View their profile
+    - Check their credits
+    - Deduct credits for services provided
+  </Accordion>
+</AccordionGroup>
+
+## Important Concepts
+
+### OAuth Access Token
+
+The **OAuth access token** is the key credential used to authenticate API requests:
+
+- Represents a specific user's ARES account
+- Used in the SDK: `new Ares({ accessToken: '...' })`
+- Sent as `Authorization: Bearer <token>` header
+- Has an expiration time (managed by your OAuth provider)
+- Should NEVER be exposed in client-side code
+
+```typescript
+// The access token authenticates as a specific user
+const client = new Ares({
+  accessToken: userOAuthAccessToken, // From your OAuth flow
+});
+
+const user = await client.user.retrieve(); // Returns this user's profile
+```
+
+### Partner Client ID
+
+The **Partner Client ID** identifies your application:
+
+- Obtained when you register as an ARES partner
+- Used as a parameter in API calls (not for authentication)
+- Public (safe to include in code)
+
+```typescript
+// Client ID identifies which partner app is making the request
+await client.partner.recordUsage({
+  client_id: process.env.ARES_CLIENT_ID, // Your partner application
+  credits: 10,
+  usage: "Generated AI content",
+});
+```
+
+### Partner Client Secret
+
+The **Partner Client Secret** is used during OAuth token exchange:
+
+- Obtained with your Client ID when registering as a partner
+- Used server-side only to exchange authorization codes for tokens
+- Must be kept secure (never expose in client code)
+- Stored in environment variables
+
+<Warning>
+  Never commit your Client Secret to version control or expose it in client-side code.
+</Warning>
+
+## Integration Options
+
+Choose the integration method that best fits your stack:
+
+<CardGroup cols={2}>
+  <Card
+    title="Clerk Integration"
+    icon="bolt"
+    href="/authentication/clerk"
+  >
+    **Recommended for most developers**
+
+    Clerk handles all OAuth complexity for you. Set up "Sign in with ARES" in minutes with one-line SDK initialization.
+  </Card>
+
+  <Card
+    title="Auth0 Integration"
+    icon="lock"
+    href="/authentication/auth0"
+  >
+    **Best for enterprise**
+
+    Enterprise-grade authentication with Auth0. Detailed setup guide and SDK helpers included.
+  </Card>
+
+  <Card
+    title="Custom OAuth"
+    icon="code"
+    href="/authentication/custom-oauth"
+  >
+    **For advanced use cases**
+
+    Implement the OAuth 2.0 flow yourself for maximum control and flexibility.
+  </Card>
+
+  <Card
+    title="Supabase + Clerk"
+    icon="database"
+    href="/authentication/clerk#using-with-supabase"
+  >
+    **Supabase users**
+
+    Use Clerk as a third-party auth provider alongside Supabase for ARES integration.
+  </Card>
+</CardGroup>
+
+## Security Best Practices
+
+<AccordionGroup>
+  <Accordion title="Server-Side Only" icon="server">
+    **All ARES SDK operations must be performed server-side.**
+
+    Never use the SDK in client-side code (browser, mobile app). This prevents:
+    - Token exposure to end users
+    - Unauthorized credit deductions
+    - Security vulnerabilities
+
+    ```typescript
+    // ✅ GOOD: Server-side API route
+    // app/api/ares/route.ts
+    export async function GET() {
+      const client = new Ares({ accessToken: getToken() });
+      return Response.json(await client.user.retrieve());
+    }
+
+    // ❌ BAD: Client-side component
+    // app/components/UserProfile.tsx
+    "use client";
+    const client = new Ares({ accessToken: token }); // NEVER DO THIS
+    ```
+  </Accordion>
+
+  <Accordion title="Environment Variables" icon="code">
+    Store all sensitive credentials in environment variables:
+
+    ```bash .env.local
+    ARES_CLIENT_ID=your_client_id
+    ARES_CLIENT_SECRET=your_client_secret
+    ```
+
+    Add `.env.local` to your `.gitignore` to prevent committing secrets.
+  </Accordion>
+
+  <Accordion title="Token Expiration" icon="clock">
+    OAuth tokens expire after a certain time. Your OAuth provider (Clerk, Auth0) should handle token refresh automatically.
+
+    If you implement custom OAuth, ensure you:
+    - Check token expiration
+    - Refresh tokens before they expire
+    - Handle 403 errors gracefully
+  </Accordion>
+
+  <Accordion title="HTTPS Only" icon="shield-check">
+    Always use HTTPS in production for:
+    - OAuth redirect URLs
+    - API endpoints
+    - Token exchange
+
+    This prevents token interception via man-in-the-middle attacks.
+  </Accordion>
+</AccordionGroup>
+
+## OAuth Endpoints
+
+When configuring OAuth providers, you'll need these ARES OAuth endpoints:
+
+| Endpoint | URL |
+|----------|-----|
+| Authorization | `https://oauth.joinares.com/authorize` |
+| Token Exchange | `https://oauth.joinares.com/token` |
+| User Info | `https://oauth.joinares.com/userinfo` |
+
+<Note>
+  Specific configuration varies by OAuth provider. See framework-specific guides for exact setup instructions.
+</Note>
+
+## Token Lifecycle
+
+Understanding the token lifecycle helps prevent authentication issues:
+
+<Steps>
+  <Step title="Token issued">
+    User completes OAuth flow → Fresh access token issued
+  </Step>
+
+  <Step title="Token used">
+    Your app uses token to make API calls → Valid for ~1 hour (varies)
+  </Step>
+
+  <Step title="Token expires">
+    After expiration time → API returns 403 Forbidden
+  </Step>
+
+  <Step title="Token refreshed">
+    OAuth provider automatically refreshes → New access token issued
+  </Step>
+</Steps>
+
+## Common OAuth Flows
+
+<Tabs>
+  <Tab title="Authorization Code Flow">
+    **Standard OAuth 2.0 flow (recommended)**
+
+    - Most secure option
+    - Requires server-side token exchange
+    - Used by Clerk, Auth0, and custom implementations
+    - Authorization code exchanged for access token on your server
+  </Tab>
+
+  <Tab title="Client Credentials Flow">
+    **Not supported for user authentication**
+
+    This flow is for machine-to-machine authentication, not user authentication. ARES requires the Authorization Code flow.
+  </Tab>
+
+  <Tab title="Implicit Flow">
+    **Deprecated - do not use**
+
+    The implicit flow is less secure and no longer recommended. Always use Authorization Code flow.
+  </Tab>
+</Tabs>
+
+## What's Next?
+
+Choose your integration method:
+
+<CardGroup cols={3}>
+  <Card
+    title="Quick Start with Clerk"
+    icon="rocket"
+    href="/authentication/clerk"
+  >
+    Get started in minutes
+  </Card>
+
+  <Card
+    title="Enterprise Auth0"
+    icon="building"
+    href="/authentication/auth0"
+  >
+    Enterprise-grade setup
+  </Card>
+
+  <Card
+    title="Custom Implementation"
+    icon="wrench"
+    href="/authentication/custom-oauth"
+  >
+    Build it yourself
+  </Card>
+</CardGroup>
+
+## Getting Your Partner Credentials
+
+To integrate ARES, you need to register as a partner:
+
+1. Visit [joinares.com](https://joinares.com)
+2. Contact **admin@joinares.com** to request partner access
+3. Receive your Partner Client ID and Client Secret
+4. Configure OAuth provider (Clerk, Auth0, or custom)
+5. Start building!
+
+<Info>
+  Partner registration is currently handled manually. Typical turnaround time is 1-2 business days.
+</Info>

@@ -1,0 +1,716 @@
+---
+title: "Error Handling"
+description: "Handle errors gracefully in your ARES integration"
+---
+
+## Overview
+
+The ARES SDK provides typed error classes for different error scenarios, making it easy to handle errors appropriately and provide good user experience.
+
+## Error Types
+
+All ARES errors extend the base `APIError` class and include:
+- `status` - HTTP status code
+- `message` - Error message
+- `headers` - Response headers
+- `error` - Raw error object from API
+
+### Available Error Classes
+
+| Error Class | Status Code | Description |
+|-------------|-------------|-------------|
+| `BadRequestError` | 400 | Invalid request parameters |
+| `AuthenticationError` | 401 | Invalid or missing OAuth token |
+| `PermissionDeniedError` | 403 | Token expired or insufficient permissions |
+| `NotFoundError` | 404 | Resource not found |
+| `ConflictError` | 409 | Request conflicts with current state |
+| `UnprocessableEntityError` | 422 | Valid request but can't be processed |
+| `RateLimitError` | 429 | Too many requests |
+| `InternalServerError` | 500+ | Server error |
+| `APIConnectionError` | N/A | Network connection failed |
+
+## Basic Error Handling
+
+### Try-Catch Pattern
+
+```typescript
+import { Ares } from 'ares-sdk';
+
+const client = new Ares({ accessToken: userToken });
+
+try {
+  const user = await client.user.retrieve();
+  console.log(user);
+} catch (error) {
+  if (error instanceof Ares.APIError) {
+    console.error('API Error:', error.status, error.message);
+  } else {
+    console.error('Unexpected error:', error);
+  }
+}
+```
+
+### Checking Specific Error Types
+
+```typescript
+import { Ares } from 'ares-sdk';
+
+try {
+  const result = await client.partner.recordUsage({
+    client_id: process.env.ARES_CLIENT_ID!,
+    credits: 100,
+    usage: 'Service',
+  });
+} catch (error) {
+  if (error instanceof Ares.AuthenticationError) {
+    // Token is invalid or missing
+    console.error('Invalid authentication token');
+    // Redirect to login
+  } else if (error instanceof Ares.PermissionDeniedError) {
+    // Token expired
+    console.error('Token has expired');
+    // Refresh token or re-authenticate
+  } else if (error instanceof Ares.InternalServerError) {
+    // Server error
+    console.error('ARES server error');
+    // Retry or show error message
+  }
+}
+```
+
+## Common Error Scenarios
+
+### 1. Insufficient Credits (402)
+
+When a user doesn't have enough credits, the API returns a 402 Payment Required error:
+
+```typescript
+async function deductCredits(client: Ares, amount: number) {
+  try {
+    await client.partner.recordUsage({
+      client_id: process.env.ARES_CLIENT_ID!,
+      credits: amount,
+      usage: 'Service purchase',
+    });
+    return { success: true };
+  } catch (error) {
+    if (error instanceof Ares.APIError && error.status === 402) {
+      return {
+        success: false,
+        error: 'INSUFFICIENT_CREDITS',
+        message: `You need ${amount} credits but don't have enough`,
+      };
+    }
+    throw error;
+  }
+}
+
+// Usage
+const result = await deductCredits(client, 50);
+if (!result.success) {
+  // Show "Add Credits" prompt to user
+  console.log(result.message);
+}
+```
+
+### 2. Invalid or Expired Token (401/403)
+
+Handle authentication failures:
+
+```typescript
+async function getUserSafely(client: Ares) {
+  try {
+    return await client.user.retrieve();
+  } catch (error) {
+    if (error instanceof Ares.AuthenticationError) {
+      // Token is invalid
+      throw new Error('INVALID_TOKEN: Please sign in again');
+    }
+
+    if (error instanceof Ares.PermissionDeniedError) {
+      // Token expired
+      throw new Error('TOKEN_EXPIRED: Your session has expired');
+    }
+
+    throw error;
+  }
+}
+```
+
+### 3. Network Errors
+
+Handle connection failures:
+
+```typescript
+import { Ares } from 'ares-sdk';
+
+async function makeRequestWithRetry(client: Ares, maxRetries = 3) {
+  let lastError: Error;
+
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await client.user.retrieve();
+    } catch (error) {
+      if (error instanceof Ares.APIConnectionError) {
+        lastError = error;
+        console.log(`Attempt ${i + 1} failed, retrying...`);
+        await sleep(1000 * Math.pow(2, i)); // Exponential backoff
+        continue;
+      }
+      throw error; // Not a connection error, throw immediately
+    }
+  }
+
+  throw new Error(`Failed after ${maxRetries} retries: ${lastError!.message}`);
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+```
+
+## HTTP Status Code Handling
+
+### Complete Status Code Handler
+
+```typescript
+async function handleAresRequest<T>(
+  request: () => Promise<T>
+): Promise<{
+  success: boolean;
+  data?: T;
+  error?: string;
+  statusCode?: number;
+}> {
+  try {
+    const data = await request();
+    return { success: true, data };
+  } catch (error) {
+    if (!(error instanceof Ares.APIError)) {
+      // Non-API error
+      console.error('Unexpected error:', error);
+      return {
+        success: false,
+        error: 'UNEXPECTED_ERROR',
+        statusCode: 500,
+      };
+    }
+
+    // Handle based on status code
+    switch (error.status) {
+      case 400:
+        return {
+          success: false,
+          error: 'BAD_REQUEST',
+          statusCode: 400,
+        };
+
+      case 401:
+        return {
+          success: false,
+          error: 'UNAUTHORIZED',
+          statusCode: 401,
+        };
+
+      case 402:
+        return {
+          success: false,
+          error: 'INSUFFICIENT_CREDITS',
+          statusCode: 402,
+        };
+
+      case 403:
+        return {
+          success: false,
+          error: 'FORBIDDEN',
+          statusCode: 403,
+        };
+
+      case 404:
+        return {
+          success: false,
+          error: 'NOT_FOUND',
+          statusCode: 404,
+        };
+
+      case 429:
+        return {
+          success: false,
+          error: 'RATE_LIMIT_EXCEEDED',
+          statusCode: 429,
+        };
+
+      case 500:
+      case 502:
+      case 503:
+        return {
+          success: false,
+          error: 'SERVER_ERROR',
+          statusCode: error.status,
+        };
+
+      default:
+        return {
+          success: false,
+          error: 'UNKNOWN_ERROR',
+          statusCode: error.status,
+        };
+    }
+  }
+}
+
+// Usage
+const result = await handleAresRequest(() => client.user.retrieve());
+
+if (result.success) {
+  console.log('User data:', result.data);
+} else {
+  console.error('Error:', result.error, result.statusCode);
+}
+```
+
+## Next.js API Route Error Handling
+
+### App Router (Server Actions & Route Handlers)
+
+```typescript app/api/ares/user/route.ts
+import { Ares } from 'ares-sdk';
+import { NextResponse } from 'next/server';
+
+export async function GET() {
+  try {
+    const client = new Ares({
+      accessToken: await getAccessToken(),
+    });
+
+    const user = await client.user.retrieve();
+
+    return NextResponse.json({
+      success: true,
+      data: user,
+    });
+  } catch (error) {
+    if (error instanceof Ares.APIError) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: error.message,
+          code: getErrorCode(error.status),
+        },
+        { status: error.status }
+      );
+    }
+
+    // Unexpected error
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+      },
+      { status: 500 }
+    );
+  }
+}
+
+function getErrorCode(status: number): string {
+  const codes: Record<number, string> = {
+    400: 'BAD_REQUEST',
+    401: 'UNAUTHORIZED',
+    402: 'INSUFFICIENT_CREDITS',
+    403: 'FORBIDDEN',
+    404: 'NOT_FOUND',
+    429: 'RATE_LIMIT',
+    500: 'SERVER_ERROR',
+  };
+  return codes[status] || 'UNKNOWN_ERROR';
+}
+```
+
+### Pages Router
+
+```typescript pages/api/user.ts
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { Ares } from 'ares-sdk';
+
+type ErrorResponse = {
+  success: false;
+  error: string;
+  code: string;
+};
+
+type SuccessResponse = {
+  success: true;
+  data: any;
+};
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse<SuccessResponse | ErrorResponse>
+) {
+  try {
+    const client = new Ares({ accessToken: getToken(req) });
+    const user = await client.user.retrieve();
+
+    res.status(200).json({
+      success: true,
+      data: user,
+    });
+  } catch (error) {
+    if (error instanceof Ares.AuthenticationError) {
+      res.status(401).json({
+        success: false,
+        error: 'Invalid authentication',
+        code: 'UNAUTHORIZED',
+      });
+    } else if (error instanceof Ares.PermissionDeniedError) {
+      res.status(403).json({
+        success: false,
+        error: 'Access denied or token expired',
+        code: 'FORBIDDEN',
+      });
+    } else if (error instanceof Ares.APIError) {
+      res.status(error.status).json({
+        success: false,
+        error: error.message,
+        code: 'API_ERROR',
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+      });
+    }
+  }
+}
+```
+
+## Client-Side Error Display
+
+### React Component Error Handling
+
+```typescript components/UserCredits.tsx
+'use client';
+
+import { useState, useEffect } from 'react';
+
+type CreditData = {
+  credits: number;
+  name: string;
+};
+
+type ErrorState = {
+  message: string;
+  code: string;
+  canRetry: boolean;
+};
+
+export function UserCredits() {
+  const [data, setData] = useState<CreditData | null>(null);
+  const [error, setError] = useState<ErrorState | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  async function fetchCredits() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/ares/user');
+      const result = await response.json();
+
+      if (!result.success) {
+        handleError(result.code, result.error);
+        return;
+      }
+
+      setData(result.data);
+    } catch (err) {
+      handleError('NETWORK_ERROR', 'Failed to connect to server');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleError(code: string, message: string) {
+    const errorMessages: Record<string, ErrorState> = {
+      UNAUTHORIZED: {
+        message: 'Please sign in with ARES',
+        code: 'UNAUTHORIZED',
+        canRetry: false,
+      },
+      FORBIDDEN: {
+        message: 'Your session has expired. Please sign in again.',
+        code: 'FORBIDDEN',
+        canRetry: false,
+      },
+      NETWORK_ERROR: {
+        message: 'Connection failed. Please try again.',
+        code: 'NETWORK_ERROR',
+        canRetry: true,
+      },
+      SERVER_ERROR: {
+        message: 'Server error. Please try again later.',
+        code: 'SERVER_ERROR',
+        canRetry: true,
+      },
+    };
+
+    setError(
+      errorMessages[code] || {
+        message,
+        code,
+        canRetry: true,
+      }
+    );
+  }
+
+  useEffect(() => {
+    fetchCredits();
+  }, []);
+
+  if (loading) return <div>Loading...</div>;
+
+  if (error) {
+    return (
+      <div className="rounded-md border border-red-300 bg-red-50 p-4">
+        <p className="text-red-800">{error.message}</p>
+        {error.canRetry && (
+          <button
+            onClick={fetchCredits}
+            className="mt-2 rounded bg-red-600 px-4 py-2 text-white hover:bg-red-700"
+          >
+            Retry
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  return (
+    <div className="rounded-md border border-green-300 bg-green-50 p-4">
+      <p className="font-semibold">{data.name}</p>
+      <p className="text-2xl font-bold">{data.credits} credits</p>
+    </div>
+  );
+}
+```
+
+## Logging Errors
+
+### Production Error Logging
+
+```typescript
+import { Ares } from 'ares-sdk';
+
+async function loggedRequest<T>(
+  operation: string,
+  request: () => Promise<T>
+): Promise<T> {
+  try {
+    return await request();
+  } catch (error) {
+    if (error instanceof Ares.APIError) {
+      console.error('ARES API Error:', {
+        operation,
+        status: error.status,
+        message: error.message,
+        timestamp: new Date().toISOString(),
+        // Add your logging service here (e.g., Sentry, LogRocket)
+      });
+    }
+    throw error;
+  }
+}
+
+// Usage
+const user = await loggedRequest('fetch_user', () =>
+  client.user.retrieve()
+);
+```
+
+### Integration with Error Tracking Services
+
+<Tabs>
+  <Tab title="Sentry">
+    ```typescript
+    import * as Sentry from '@sentry/nextjs';
+    import { Ares } from 'ares-sdk';
+
+    try {
+      await client.user.retrieve();
+    } catch (error) {
+      if (error instanceof Ares.APIError) {
+        Sentry.captureException(error, {
+          tags: {
+            error_type: 'ares_api_error',
+            status_code: error.status,
+          },
+          extra: {
+            message: error.message,
+            headers: error.headers,
+          },
+        });
+      }
+      throw error;
+    }
+    ```
+  </Tab>
+
+  <Tab title="LogRocket">
+    ```typescript
+    import LogRocket from 'logrocket';
+    import { Ares } from 'ares-sdk';
+
+    try {
+      await client.user.retrieve();
+    } catch (error) {
+      if (error instanceof Ares.APIError) {
+        LogRocket.captureException(error, {
+          tags: {
+            component: 'ares-sdk',
+            status: error.status,
+          },
+        });
+      }
+      throw error;
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Error Recovery Patterns
+
+### Graceful Degradation
+
+```typescript
+async function getUserWithFallback(client: Ares) {
+  try {
+    return await client.user.retrieve();
+  } catch (error) {
+    if (error instanceof Ares.APIError) {
+      console.warn('Failed to fetch ARES user, using cached data');
+      return getCachedUserData(); // Fallback to cache
+    }
+    throw error;
+  }
+}
+```
+
+### Circuit Breaker Pattern
+
+```typescript
+class CircuitBreaker {
+  private failures = 0;
+  private lastFailTime = 0;
+  private readonly threshold = 5;
+  private readonly timeout = 60000; // 1 minute
+
+  async execute<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.isOpen()) {
+      throw new Error('Circuit breaker is open');
+    }
+
+    try {
+      const result = await fn();
+      this.onSuccess();
+      return result;
+    } catch (error) {
+      this.onFailure();
+      throw error;
+    }
+  }
+
+  private isOpen(): boolean {
+    return (
+      this.failures >= this.threshold &&
+      Date.now() - this.lastFailTime < this.timeout
+    );
+  }
+
+  private onSuccess() {
+    this.failures = 0;
+  }
+
+  private onFailure() {
+    this.failures++;
+    this.lastFailTime = Date.now();
+  }
+}
+
+const breaker = new CircuitBreaker();
+
+// Usage
+try {
+  const user = await breaker.execute(() => client.user.retrieve());
+} catch (error) {
+  console.error('Circuit breaker prevented request or request failed');
+}
+```
+
+## Testing Error Scenarios
+
+### Mock Error Responses
+
+```typescript
+import { vi } from 'vitest';
+import { Ares } from 'ares-sdk';
+
+describe('Error handling', () => {
+  it('handles insufficient credits', async () => {
+    const mockClient = {
+      partner: {
+        recordUsage: vi.fn().mockRejectedValue(
+          new Ares.APIError('Insufficient credits', 402, {}, {})
+        ),
+      },
+    } as any;
+
+    await expect(
+      mockClient.partner.recordUsage({
+        client_id: 'test',
+        credits: 100,
+        usage: 'test',
+      })
+    ).rejects.toThrow('Insufficient credits');
+  });
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Advanced Features"
+    icon="rocket"
+    href="/sdk/advanced-features"
+  >
+    Learn about retries, timeouts, and logging
+  </Card>
+
+  <Card
+    title="Examples"
+    icon="code"
+    href="/examples/nextjs"
+  >
+    See complete working examples
+  </Card>
+
+  <Card
+    title="API Reference"
+    icon="book"
+    href="/api-reference/introduction"
+  >
+    Detailed API documentation
+  </Card>
+
+  <Card
+    title="Basic Usage"
+    icon="play"
+    href="/sdk/basic-usage"
+  >
+    Back to basic SDK usage
+  </Card>
+</CardGroup>

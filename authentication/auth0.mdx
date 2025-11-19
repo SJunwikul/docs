@@ -1,0 +1,598 @@
+---
+title: "Auth0 Integration"
+description: "Enterprise-grade authentication with Auth0 and ARES"
+---
+
+## Overview
+
+Auth0 provides enterprise-grade authentication with advanced features like single sign-on (SSO), multi-factor authentication (MFA), and detailed user management. This guide shows you how to integrate ARES OAuth with Auth0.
+
+<Note>
+  **Prerequisites**:
+  - Active Auth0 account
+  - ARES Partner Client ID and Secret (contact admin@joinares.com)
+  - Auth0 Management API access token
+</Note>
+
+<Info>
+  Auth0 integration requires additional setup compared to Clerk but provides more flexibility and enterprise features.
+</Info>
+
+## Why Auth0?
+
+<CardGroup cols={2}>
+  <Card title="Enterprise Features" icon="building">
+    SSO, MFA, advanced security policies
+  </Card>
+
+  <Card title="Extensive Customization" icon="wrench">
+    Full control over authentication flows
+  </Card>
+
+  <Card title="Compliance Ready" icon="shield-check">
+    SOC 2, GDPR, HIPAA compliance support
+  </Card>
+
+  <Card title="Detailed Analytics" icon="chart-line">
+    Comprehensive user and auth logs
+  </Card>
+</CardGroup>
+
+## Step 1: Install Dependencies
+
+Install Auth0 SDK and ARES SDK:
+
+<CodeGroup>
+
+```bash npm
+npm install @auth0/nextjs-auth0 ares-sdk
+```
+
+```bash yarn
+yarn add @auth0/nextjs-auth0 ares-sdk
+```
+
+```bash pnpm
+pnpm add @auth0/nextjs-auth0 ares-sdk
+```
+
+</CodeGroup>
+
+## Step 2: Configure Auth0
+
+### Set Up Your Auth0 Application
+
+1. Log into your [Auth0 Dashboard](https://manage.auth0.com)
+2. Navigate to **Applications** → **Create Application**
+3. Choose **Regular Web Application**
+4. Note your **Domain**, **Client ID**, and **Client Secret**
+
+### Configure Callback URLs
+
+In your Auth0 application settings, add:
+
+| Setting | Value (adjust for your domain) |
+|---------|-------------------------------|
+| **Allowed Callback URLs** | `http://localhost:3000/api/auth/callback` (dev)<br/>`https://yourdomain.com/api/auth/callback` (prod) |
+| **Allowed Logout URLs** | `http://localhost:3000` (dev)<br/>`https://yourdomain.com` (prod) |
+| **Allowed Web Origins** | `http://localhost:3000` (dev)<br/>`https://yourdomain.com` (prod) |
+
+### Add ARES as Social Connection
+
+1. Navigate to **Authentication** → **Social**
+2. Click **Create Connection**
+3. Scroll to bottom and choose **Create Custom**
+4. Configure with these settings:
+
+| Setting | Value |
+|---------|-------|
+| **Name** | ARES |
+| **Authorization URL** | `https://joinares.com/oauth` |
+| **Token URL** | `https://oauth.joinares.com/oauth/token` |
+| **Client ID** | Your ARES Partner Client ID |
+| **Client Secret** | Your ARES Partner Client Secret |
+| **Fetch User Profile Script** | See below |
+
+**Fetch User Profile Script:**
+
+```javascript
+function fetchUserProfile(accessToken, context, callback) {
+  request.get(
+    {
+      url: 'https://oauth.joinares.com/v1/user',
+      headers: {
+        'Authorization': 'Bearer ' + accessToken,
+      }
+    },
+    (err, resp, body) => {
+      if (err) return callback(err);
+      if (resp.statusCode !== 200) return callback(new Error(body));
+
+      let bodyParsed = JSON.parse(body);
+      const profile = {
+        user_id: bodyParsed.user.id,
+        username: bodyParsed.user.name,
+        email: bodyParsed.user.email
+      };
+      callback(null, profile);
+    }
+  );
+}
+```
+
+<Note>
+  After creating the connection, email your redirect URI and Client ID to **admin@joinares.com** for verification before enabling in production.
+</Note>
+
+### Get Management API Token
+
+You'll need an Auth0 Management API token to retrieve user OAuth tokens:
+
+1. Go to **Applications** → **APIs**
+2. Click **Auth0 Management API**
+3. Go to **Machine to Machine Applications**
+4. Authorize your application
+5. Grant these permissions:
+   - `read:users`
+   - `read:user_idp_tokens`
+6. Copy the token (or create a way to generate them programmatically)
+
+## Step 3: Set Up Environment Variables
+
+Add these to your `.env.local`:
+
+```bash .env.local
+# Auth0 Configuration
+AUTH0_SECRET='your-long-random-secret-string' # Generate with: openssl rand -hex 32
+AUTH0_BASE_URL='http://localhost:3000' # Your app URL
+AUTH0_ISSUER_BASE_URL='https://your-domain.auth0.com'
+AUTH0_CLIENT_ID='your-auth0-client-id'
+AUTH0_CLIENT_SECRET='your-auth0-client-secret'
+
+# Auth0 Management API
+AUTH0_DOMAIN='your-domain.auth0.com'
+AUTH0_MANAGEMENT_TOKEN='your-management-api-token'
+
+# ARES Partner Credentials
+ARES_CLIENT_ID='your-ares-partner-client-id'
+ARES_CLIENT_SECRET='your-ares-partner-client-secret'
+```
+
+<Warning>
+  Never commit `.env.local` to version control. Add it to `.gitignore`.
+</Warning>
+
+## Step 4: Set Up Auth0 SDK (Next.js)
+
+### Configure Auth0 Handler
+
+Create `app/api/auth/[auth0]/route.ts`:
+
+```typescript app/api/auth/[auth0]/route.ts
+import { handleAuth } from '@auth0/nextjs-auth0';
+
+export const GET = handleAuth();
+```
+
+This creates the following routes automatically:
+- `/api/auth/login` - Login
+- `/api/auth/logout` - Logout
+- `/api/auth/callback` - OAuth callback
+- `/api/auth/me` - User profile
+
+### Wrap Your App with UserProvider
+
+Update `app/layout.tsx`:
+
+```typescript app/layout.tsx
+import { UserProvider } from '@auth0/nextjs-auth0/client';
+import './globals.css';
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body>
+        <UserProvider>
+          {children}
+        </UserProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+## Step 5: Integrate ARES SDK
+
+### Create Auth0 Token Helper
+
+The ARES SDK needs the user's OAuth access token. Create a helper to retrieve it:
+
+```typescript lib/auth0-ares.ts
+import { ManagementClient } from 'auth0';
+
+const management = new ManagementClient({
+  domain: process.env.AUTH0_DOMAIN!,
+  token: process.env.AUTH0_MANAGEMENT_TOKEN!,
+});
+
+export async function getAresTokenForUser(auth0UserId: string): Promise<string | null> {
+  try {
+    // Get user's identity from Auth0
+    const user = await management.users.get({ id: auth0UserId });
+
+    // Find ARES identity
+    const aresIdentity = user.data.identities?.find(
+      (identity) => identity.connection === 'ARES' // Match your connection name
+    );
+
+    if (!aresIdentity || !aresIdentity.access_token) {
+      return null;
+    }
+
+    return aresIdentity.access_token;
+  } catch (error) {
+    console.error('Failed to get ARES token:', error);
+    return null;
+  }
+}
+
+export async function hasAresConnection(auth0UserId: string): Promise<boolean> {
+  try {
+    const user = await management.users.get({ id: auth0UserId });
+    return user.data.identities?.some(
+      (identity) => identity.connection === 'ARES'
+    ) ?? false;
+  } catch (error) {
+    console.error('Failed to check ARES connection:', error);
+    return false;
+  }
+}
+```
+
+<Info>
+  For production, consider caching Management API tokens and using a token refresh strategy instead of a static token.
+</Info>
+
+### Create ARES Client Helper
+
+```typescript lib/ares-client.ts
+import { Ares } from 'ares-sdk';
+import { getAresTokenForUser } from './auth0-ares';
+
+export async function createAresClient(auth0UserId: string): Promise<Ares | null> {
+  const aresToken = await getAresTokenForUser(auth0UserId);
+
+  if (!aresToken) {
+    return null;
+  }
+
+  return new Ares({
+    accessToken: aresToken,
+  });
+}
+```
+
+## Step 6: Create API Routes
+
+### Get User Profile from ARES
+
+```typescript app/api/ares/user/route.ts
+import { getSession } from '@auth0/nextjs-auth0';
+import { createAresClient } from '@/lib/ares-client';
+
+export async function GET() {
+  const session = await getSession();
+
+  if (!session) {
+    return Response.json(
+      { error: 'Not authenticated' },
+      { status: 401 }
+    );
+  }
+
+  const aresClient = await createAresClient(session.user.sub);
+
+  if (!aresClient) {
+    return Response.json(
+      { error: 'ARES not connected. Please link your ARES account.' },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const user = await aresClient.user.retrieve();
+
+    return Response.json({
+      name: user.name,
+      email: user.email,
+      credits: user.credits,
+      avatar: user.picture,
+    });
+  } catch (error) {
+    console.error('Failed to fetch ARES user:', error);
+    return Response.json(
+      { error: 'Failed to fetch user data from ARES' },
+      { status: 500 }
+    );
+  }
+}
+```
+
+### Record Usage and Deduct Credits
+
+```typescript app/api/ares/usage/route.ts
+import { getSession } from '@auth0/nextjs-auth0';
+import { createAresClient } from '@/lib/ares-client';
+
+export async function POST(request: Request) {
+  const session = await getSession();
+
+  if (!session) {
+    return Response.json(
+      { error: 'Not authenticated' },
+      { status: 401 }
+    );
+  }
+
+  const aresClient = await createAresClient(session.user.sub);
+
+  if (!aresClient) {
+    return Response.json(
+      { error: 'ARES not connected' },
+      { status: 400 }
+    );
+  }
+
+  const { usage, credits } = await request.json();
+
+  try {
+    const result = await aresClient.partner.recordUsage({
+      client_id: process.env.ARES_CLIENT_ID!,
+      credits: credits,
+      usage: usage,
+    });
+
+    return Response.json({
+      success: true,
+      creditsDeducted: result.usage.credits_earned,
+      timestamp: result.usage.usage_timestamp,
+    });
+  } catch (error: any) {
+    if (error.status === 402) {
+      return Response.json(
+        { error: 'Insufficient credits' },
+        { status: 402 }
+      );
+    }
+
+    console.error('Failed to record usage:', error);
+    return Response.json(
+      { error: 'Failed to record usage' },
+      { status: 500 }
+    );
+  }
+}
+```
+
+## Step 7: Client-Side Integration
+
+### Login Button
+
+```typescript components/LoginButton.tsx
+'use client';
+
+export function LoginButton() {
+  return (
+    <a
+      href="/api/auth/login?connection=ARES"
+      className="rounded-md bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700"
+    >
+      Sign in with ARES
+    </a>
+  );
+}
+```
+
+### User Profile with Credits
+
+```typescript components/UserProfile.tsx
+'use client';
+
+import { useUser } from '@auth0/nextjs-auth0/client';
+import { useEffect, useState } from 'react';
+
+export function UserProfile() {
+  const { user, isLoading } = useUser();
+  const [aresData, setAresData] = useState<any>(null);
+
+  useEffect(() => {
+    if (user) {
+      fetch('/api/ares/user')
+        .then((res) => res.json())
+        .then((data) => {
+          if (!data.error) {
+            setAresData(data);
+          }
+        })
+        .catch(console.error);
+    }
+  }, [user]);
+
+  if (isLoading) return <div>Loading...</div>;
+  if (!user) return null;
+
+  return (
+    <div className="rounded-lg border border-gray-200 p-4">
+      <img
+        src={aresData?.avatar || user.picture}
+        alt={user.name}
+        className="h-12 w-12 rounded-full"
+      />
+      <h3 className="mt-2 font-semibold">{user.name}</h3>
+      <p className="text-sm text-gray-600">{user.email}</p>
+
+      {aresData && (
+        <p className="mt-2 text-lg font-bold">
+          Credits: {aresData.credits}
+        </p>
+      )}
+
+      {!aresData && (
+        <p className="mt-2 text-sm text-yellow-600">
+          ARES not connected
+        </p>
+      )}
+    </div>
+  );
+}
+```
+
+## Advanced: Programmatic Token Management
+
+For production environments, use a programmatic approach to manage Management API tokens:
+
+```typescript lib/auth0-management.ts
+import { AuthenticationClient, ManagementClient } from 'auth0';
+
+let cachedToken: string | null = null;
+let tokenExpiry: number = 0;
+
+async function getManagementToken(): Promise<string> {
+  // Return cached token if still valid
+  if (cachedToken && Date.now() < tokenExpiry) {
+    return cachedToken;
+  }
+
+  // Get new token
+  const authClient = new AuthenticationClient({
+    domain: process.env.AUTH0_DOMAIN!,
+    clientId: process.env.AUTH0_MANAGEMENT_CLIENT_ID!,
+    clientSecret: process.env.AUTH0_MANAGEMENT_CLIENT_SECRET!,
+  });
+
+  const response = await authClient.clientCredentialsGrant({
+    audience: `https://${process.env.AUTH0_DOMAIN}/api/v2/`,
+  });
+
+  cachedToken = response.data.access_token;
+  // Set expiry 5 minutes before actual expiry
+  tokenExpiry = Date.now() + (response.data.expires_in - 300) * 1000;
+
+  return cachedToken;
+}
+
+export async function getManagementClient(): Promise<ManagementClient> {
+  const token = await getManagementToken();
+
+  return new ManagementClient({
+    domain: process.env.AUTH0_DOMAIN!,
+    token: token,
+  });
+}
+```
+
+## Error Handling
+
+Handle common Auth0 + ARES integration errors:
+
+```typescript
+try {
+  const aresClient = await createAresClient(userId);
+
+  if (!aresClient) {
+    return Response.json(
+      {
+        error: 'ARES_NOT_CONNECTED',
+        message: 'Please connect your ARES account',
+        action: '/api/auth/login?connection=ARES'
+      },
+      { status: 400 }
+    );
+  }
+
+  const user = await aresClient.user.retrieve();
+  return Response.json(user);
+
+} catch (error: any) {
+  if (error.status === 401) {
+    return Response.json(
+      { error: 'INVALID_TOKEN', message: 'ARES token is invalid' },
+      { status: 401 }
+    );
+  }
+
+  if (error.status === 403) {
+    return Response.json(
+      { error: 'TOKEN_EXPIRED', message: 'ARES token has expired' },
+      { status: 403 }
+    );
+  }
+
+  throw error;
+}
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Cannot get Management API token" icon="key">
+    **Solution:**
+    - Verify Management API permissions include `read:users` and `read:user_idp_tokens`
+    - Check that your application is authorized for the Management API
+    - Ensure token hasn't expired
+  </Accordion>
+
+  <Accordion title="ARES identity not found" icon="user-slash">
+    **Solution:**
+    - Verify user has connected ARES account via Auth0
+    - Check connection name matches in code and Auth0 dashboard
+    - Ensure ARES social connection is enabled
+  </Accordion>
+
+  <Accordion title="Access token missing" icon="circle-exclamation">
+    **Solution:**
+    - Verify `read:user_idp_tokens` permission is granted
+    - Check that ARES connection is saving access tokens
+    - Re-authenticate user to get fresh token
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="SDK Documentation"
+    icon="code"
+    href="/sdk/basic-usage"
+  >
+    Explore all SDK features
+  </Card>
+
+  <Card
+    title="Error Handling"
+    icon="triangle-exclamation"
+    href="/sdk/error-handling"
+  >
+    Handle errors gracefully
+  </Card>
+
+  <Card
+    title="API Reference"
+    icon="book"
+    href="/api-reference/introduction"
+  >
+    Complete API documentation
+  </Card>
+
+  <Card
+    title="Examples"
+    icon="rocket"
+    href="/examples/nextjs"
+  >
+    See working examples
+  </Card>
+</CardGroup>

@@ -1,0 +1,488 @@
+---
+title: "Basic Usage"
+description: "Learn the fundamentals of using the ARES SDK"
+---
+
+## Initializing the Client
+
+The ARES SDK requires an **OAuth access token** to authenticate requests. This token represents a specific user's ARES account.
+
+### Basic Initialization
+
+```typescript
+import { Ares } from 'ares-sdk';
+
+const client = new Ares({
+  accessToken: 'user_oauth_access_token',
+});
+```
+
+<Warning>
+  The access token must be obtained through the OAuth 2.0 flow. See the [Authentication Guide](/authentication/overview) for details.
+</Warning>
+
+### With Environment Variables
+
+```typescript
+const client = new Ares({
+  accessToken: process.env.ARES_ACCESS_TOKEN,
+});
+```
+
+### With Clerk (Recommended)
+
+```typescript
+import { createAresFromClerkAuth } from 'ares-sdk/lib/clerk';
+import { auth } from '@clerk/nextjs/server';
+import { clerkClient } from '@clerk/nextjs/server';
+
+const client = await createAresFromClerkAuth(auth(), {
+  clerkClient: clerkClient(),
+});
+
+if (!client) {
+  throw new Error('User not authenticated with ARES');
+}
+```
+
+## Core API Methods
+
+The SDK provides two main API resources:
+
+1. **User Resource** - Retrieve user profile and credits
+2. **Partner Resource** - Record usage and deduct credits
+
+### User Resource
+
+#### Get Authenticated User
+
+Retrieves the profile of the user whose OAuth token is being used:
+
+```typescript
+const user = await client.user.retrieve();
+
+console.log(user.id);      // UUID
+console.log(user.email);   // user@example.com
+console.log(user.name);    // John Doe
+console.log(user.credits); // 150
+console.log(user.picture); // https://example.com/avatar.jpg (optional)
+```
+
+**Response Type:**
+
+```typescript
+interface UserRetrieveResponse {
+  id: string;
+  email: string;
+  name: string;
+  credits: number;
+  picture?: string;
+}
+```
+
+#### Example: Display User Credits
+
+```typescript
+async function displayUserCredits() {
+  const user = await client.user.retrieve();
+
+  return {
+    message: `${user.name} has ${user.credits} credits remaining`,
+    credits: user.credits,
+    canProceed: user.credits >= 10, // Check if user has enough credits
+  };
+}
+```
+
+### Partner Resource
+
+#### Record Usage and Deduct Credits
+
+Records usage by your partner application and deducts credits from the user's account:
+
+```typescript
+const result = await client.partner.recordUsage({
+  client_id: process.env.ARES_CLIENT_ID!,  // Your partner application ID
+  credits: 10,                              // Amount to deduct
+  usage: 'Generated AI content',            // Description of service
+});
+
+console.log(result.message);                         // "Success"
+console.log(result.usage.credits_earned);            // 10
+console.log(result.usage.usage_timestamp);           // "2024-01-15T10:30:00Z"
+console.log(result.usage.user_id);                   // User's ARES ID
+```
+
+**Request Parameters:**
+
+```typescript
+interface PartnerRecordUsageParams {
+  client_id: string;  // Your ARES Partner Client ID
+  credits: number;    // Credits to deduct (must be positive)
+  usage: string;      // Description of what was used
+}
+```
+
+**Response Type:**
+
+```typescript
+interface UsageResponse {
+  message: string;
+  usage: {
+    usage_timestamp: string;
+    user_id: string;
+    client_id: string;
+    credits_earned: number;
+    usage: string;
+  };
+}
+```
+
+## Complete Usage Example
+
+Here's a complete example showing both API calls:
+
+```typescript app/api/generate-content/route.ts
+import { createAresFromClerkAuth } from 'ares-sdk/lib/clerk';
+import { auth } from '@clerk/nextjs/server';
+import { clerkClient } from '@clerk/nextjs/server';
+
+const COST_PER_GENERATION = 10; // Credits per generation
+
+export async function POST(request: Request) {
+  // 1. Authenticate user and create ARES client
+  const aresClient = await createAresFromClerkAuth(auth(), {
+    clerkClient: clerkClient(),
+  });
+
+  if (!aresClient) {
+    return Response.json(
+      { error: 'Not authenticated with ARES' },
+      { status: 401 }
+    );
+  }
+
+  try {
+    // 2. Check user's credits before providing service
+    const user = await aresClient.user.retrieve();
+
+    if (user.credits < COST_PER_GENERATION) {
+      return Response.json(
+        {
+          error: 'Insufficient credits',
+          required: COST_PER_GENERATION,
+          available: user.credits,
+        },
+        { status: 402 }
+      );
+    }
+
+    // 3. Provide your service (e.g., generate content)
+    const content = await generateAIContent(); // Your service logic
+
+    // 4. Deduct credits from user's account
+    await aresClient.partner.recordUsage({
+      client_id: process.env.ARES_CLIENT_ID!,
+      credits: COST_PER_GENERATION,
+      usage: 'Generated AI content',
+    });
+
+    // 5. Return result
+    return Response.json({
+      success: true,
+      content: content,
+      creditsUsed: COST_PER_GENERATION,
+      creditsRemaining: user.credits - COST_PER_GENERATION,
+    });
+  } catch (error) {
+    console.error('Error:', error);
+    return Response.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+async function generateAIContent(): Promise<string> {
+  // Your AI content generation logic
+  return 'Generated content...';
+}
+```
+
+## Working with Responses
+
+### Using TypeScript Types
+
+Import types for better type safety:
+
+```typescript
+import type {
+  Ares,
+  UserRetrieveResponse,
+  PartnerRecordUsageParams,
+  UsageResponse,
+} from 'ares-sdk';
+
+async function getUser(client: Ares): Promise<UserRetrieveResponse> {
+  return await client.user.retrieve();
+}
+
+async function deductCredits(
+  client: Ares,
+  params: PartnerRecordUsageParams
+): Promise<UsageResponse> {
+  return await client.partner.recordUsage(params);
+}
+```
+
+### Accessing Raw Response
+
+Use `.asResponse()` to access the raw HTTP response:
+
+```typescript
+// Get raw response (doesn't consume body)
+const response = await client.user.retrieve().asResponse();
+console.log(response.headers.get('X-Request-ID'));
+console.log(response.status); // 200
+
+// Get both parsed data and raw response
+const { data, response: raw } = await client.user.retrieve().withResponse();
+console.log(data.credits); // Parsed user data
+console.log(raw.headers.get('X-Request-ID')); // Raw response
+```
+
+## Best Practices
+
+### 1. Check Credits Before Providing Service
+
+Always verify the user has enough credits before performing expensive operations:
+
+```typescript
+async function provideService(client: Ares, requiredCredits: number) {
+  // Check credits first
+  const user = await client.user.retrieve();
+
+  if (user.credits < requiredCredits) {
+    throw new Error(`Insufficient credits. Required: ${requiredCredits}, Available: ${user.credits}`);
+  }
+
+  // Provide service
+  const result = await expensiveOperation();
+
+  // Deduct credits
+  await client.partner.recordUsage({
+    client_id: process.env.ARES_CLIENT_ID!,
+    credits: requiredCredits,
+    usage: 'Expensive operation',
+  });
+
+  return result;
+}
+```
+
+### 2. Use Descriptive Usage Strings
+
+Help users understand what they're being charged for:
+
+```typescript
+// ✅ Good - Descriptive
+await client.partner.recordUsage({
+  client_id: process.env.ARES_CLIENT_ID!,
+  credits: 50,
+  usage: 'Generated 1000 word article with GPT-4',
+});
+
+// ❌ Bad - Vague
+await client.partner.recordUsage({
+  client_id: process.env.ARES_CLIENT_ID!,
+  credits: 50,
+  usage: 'Service',
+});
+```
+
+### 3. Handle Errors Gracefully
+
+Wrap API calls in try-catch blocks:
+
+```typescript
+try {
+  const user = await client.user.retrieve();
+  return user;
+} catch (error) {
+  if (error instanceof Ares.APIError) {
+    console.error('API Error:', error.status, error.message);
+    // Handle specific error
+  } else {
+    console.error('Unexpected error:', error);
+  }
+  throw error;
+}
+```
+
+See the [Error Handling Guide](/sdk/error-handling) for detailed error handling strategies.
+
+### 4. Cache User Data When Appropriate
+
+Don't fetch user data on every request if you can cache it:
+
+```typescript
+import { cache } from 'react';
+
+// Next.js App Router - cache for single request
+export const getCachedUser = cache(async (client: Ares) => {
+  return await client.user.retrieve();
+});
+
+// Or use a caching library like Redis
+async function getUserWithCache(client: Ares, userId: string) {
+  const cached = await redis.get(`user:${userId}`);
+  if (cached) return JSON.parse(cached);
+
+  const user = await client.user.retrieve();
+  await redis.set(`user:${userId}`, JSON.stringify(user), 'EX', 300); // 5 min cache
+  return user;
+}
+```
+
+<Warning>
+  Be careful not to cache credit balances for too long, as they change when users make purchases or use services.
+</Warning>
+
+### 5. Server-Side Only
+
+Never use the SDK in client-side code:
+
+```typescript
+// ✅ GOOD: Server-side API route
+// app/api/user/route.ts
+export async function GET() {
+  const client = new Ares({ accessToken: getToken() });
+  return Response.json(await client.user.retrieve());
+}
+
+// ❌ BAD: Client component
+// app/components/Profile.tsx
+'use client';
+const client = new Ares({ accessToken: token }); // NEVER DO THIS!
+```
+
+## Common Patterns
+
+### Pattern: Credit Check Before Service
+
+```typescript
+async function withCreditCheck(
+  client: Ares,
+  cost: number,
+  serviceCallback: () => Promise<any>
+) {
+  const user = await client.user.retrieve();
+
+  if (user.credits < cost) {
+    throw new Error('INSUFFICIENT_CREDITS');
+  }
+
+  const result = await serviceCallback();
+
+  await client.partner.recordUsage({
+    client_id: process.env.ARES_CLIENT_ID!,
+    credits: cost,
+    usage: 'Service execution',
+  });
+
+  return result;
+}
+
+// Usage
+const result = await withCreditCheck(client, 20, async () => {
+  return await myExpensiveService();
+});
+```
+
+### Pattern: Tiered Pricing
+
+```typescript
+async function recordUsageWithTier(
+  client: Ares,
+  service: 'basic' | 'premium' | 'enterprise'
+) {
+  const pricing = {
+    basic: { credits: 5, description: 'Basic AI generation' },
+    premium: { credits: 20, description: 'Premium AI with custom model' },
+    enterprise: { credits: 50, description: 'Enterprise AI with fine-tuning' },
+  };
+
+  const tier = pricing[service];
+
+  await client.partner.recordUsage({
+    client_id: process.env.ARES_CLIENT_ID!,
+    credits: tier.credits,
+    usage: tier.description,
+  });
+}
+```
+
+### Pattern: Batch Operations
+
+```typescript
+async function processBatch(client: Ares, items: string[]) {
+  const costPerItem = 2;
+  const totalCost = items.length * costPerItem;
+
+  // Check credits once for entire batch
+  const user = await client.user.retrieve();
+  if (user.credits < totalCost) {
+    throw new Error('Insufficient credits for batch operation');
+  }
+
+  // Process all items
+  const results = await Promise.all(
+    items.map(item => processItem(item))
+  );
+
+  // Record usage once for batch
+  await client.partner.recordUsage({
+    client_id: process.env.ARES_CLIENT_ID!,
+    credits: totalCost,
+    usage: `Processed batch of ${items.length} items`,
+  });
+
+  return results;
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Error Handling"
+    icon="triangle-exclamation"
+    href="/sdk/error-handling"
+  >
+    Learn how to handle errors and edge cases
+  </Card>
+
+  <Card
+    title="Advanced Features"
+    icon="rocket"
+    href="/sdk/advanced-features"
+  >
+    Explore retries, timeouts, and logging
+  </Card>
+
+  <Card
+    title="Complete Examples"
+    icon="code"
+    href="/examples/nextjs"
+  >
+    See working example applications
+  </Card>
+
+  <Card
+    title="API Reference"
+    icon="book"
+    href="/api-reference/introduction"
+  >
+    Detailed API documentation
+  </Card>
+</CardGroup>

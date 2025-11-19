@@ -1,0 +1,165 @@
+---
+title: "API Route Patterns"
+description: "Common API route patterns and use cases"
+---
+
+## Common Patterns
+
+### 1. Credit Check Before Service
+
+```typescript
+export async function POST(request: Request) {
+  const aresClient = await getAresClient(request);
+  const { serviceCost } = await request.json();
+
+  // Check credits first
+  const user = await aresClient.user.retrieve();
+
+  if (user.credits < serviceCost) {
+    return Response.json(
+      {
+        error: 'INSUFFICIENT_CREDITS',
+        required: serviceCost,
+        available: user.credits,
+      },
+      { status: 402 }
+    );
+  }
+
+  // Provide service
+  const result = await provideService();
+
+  // Deduct credits
+  await aresClient.partner.recordUsage({
+    client_id: process.env.ARES_CLIENT_ID!,
+    credits: serviceCost,
+    usage: 'Service provided',
+  });
+
+  return Response.json({ success: true, result });
+}
+```
+
+### 2. Tiered Pricing
+
+```typescript
+const PRICING = {
+  basic: { credits: 10, features: ['Feature A'] },
+  premium: { credits: 50, features: ['Feature A', 'Feature B'] },
+  enterprise: { credits: 200, features: ['Feature A', 'Feature B', 'Feature C'] },
+};
+
+export async function POST(request: Request) {
+  const { tier } = await request.json();
+  const pricing = PRICING[tier as keyof typeof PRICING];
+
+  const aresClient = await getAresClient(request);
+
+  await aresClient.partner.recordUsage({
+    client_id: process.env.ARES_CLIENT_ID!,
+    credits: pricing.credits,
+    usage: `${tier} tier service`,
+  });
+
+  return Response.json({
+    success: true,
+    tier,
+    features: pricing.features,
+  });
+}
+```
+
+### 3. Batch Operations
+
+```typescript
+export async function POST(request: Request) {
+  const { items } = await request.json();
+  const costPerItem = 5;
+  const totalCost = items.length * costPerItem;
+
+  const aresClient = await getAresClient(request);
+
+  // Check credits for entire batch
+  const user = await aresClient.user.retrieve();
+  if (user.credits < totalCost) {
+    return Response.json(
+      { error: 'Insufficient credits for batch operation' },
+      { status: 402 }
+    );
+  }
+
+  // Process all items
+  const results = await Promise.all(
+    items.map(item => processItem(item))
+  );
+
+  // Deduct credits once
+  await aresClient.partner.recordUsage({
+    client_id: process.env.ARES_CLIENT_ID!,
+    credits: totalCost,
+    usage: `Batch processing of ${items.length} items`,
+  });
+
+  return Response.json({ success: true, results });
+}
+```
+
+### 4. Error Recovery
+
+```typescript
+export async function POST(request: Request) {
+  const aresClient = await getAresClient(request);
+
+  try {
+    const result = await expensiveOperation();
+
+    await aresClient.partner.recordUsage({
+      client_id: process.env.ARES_CLIENT_ID!,
+      credits: 100,
+      usage: 'Expensive operation',
+    });
+
+    return Response.json({ success: true, result });
+  } catch (error) {
+    // Operation failed - don't deduct credits
+    console.error('Operation failed:', error);
+
+    return Response.json(
+      {
+        error: 'Operation failed',
+        message: 'No credits were deducted',
+      },
+      { status: 500 }
+    );
+  }
+}
+```
+
+### 5. Usage with Metadata
+
+```typescript
+export async function POST(request: Request) {
+  const { action, metadata } = await request.json();
+
+  const aresClient = await getAresClient(request);
+
+  await aresClient.partner.recordUsage({
+    client_id: process.env.ARES_CLIENT_ID!,
+    credits: 25,
+    usage: `${action} - ${JSON.stringify(metadata)}`,
+  });
+
+  return Response.json({ success: true });
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Next.js Example" href="/examples/nextjs">
+    Complete application example
+  </Card>
+  <Card title="Error Handling" href="/sdk/error-handling">
+    Handle errors gracefully
+  </Card>
+</CardGroup>

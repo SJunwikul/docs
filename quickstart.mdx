@@ -1,80 +1,307 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Get started with ARES in under 5 minutes"
 ---
 
-## Get started in three steps
+## Get started with ARES
 
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This guide will walk you through setting up the ARES TypeScript SDK and making your first API call.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  **Prerequisites**: You need an ARES partner account. Visit
+  [joinares.com](https://joinares.com) to register as a partner and obtain your
+  credentials.
 </Note>
+
+## Step 1: Install the SDK
+
+Install the ARES SDK via npm, yarn, or pnpm:
+
+<CodeGroup>
+
+```bash npm
+npm install ares-sdk
+```
+
+```bash yarn
+yarn add ares-sdk
+```
+
+```bash pnpm
+pnpm add ares-sdk
+```
+
+</CodeGroup>
+
+## Step 2: Set up environment variables
+
+Create a `.env` file in your project root and add your ARES credentials:
+
+```bash .env
+ARES_CLIENT_ID=your_partner_client_id
+ARES_CLIENT_SECRET=your_partner_client_secret
+```
+
+<Warning>
+  Never commit your `.env` file or expose credentials in client-side code. The
+  ARES SDK is server-side only.
+</Warning>
+
+## Step 3: Set up authentication
+
+Choose your authentication method (we have guides for other frameworks [here](/authentication/overview)).
+We recommend Clerk for the easiest setup:
+
+<Tabs>
+  <Tab title="Clerk (Recommended)">
+    Install Clerk and configure "Sign in with ARES":
+
+    ```bash
+    npm install @clerk/nextjs
+    ```
+
+    Add Clerk environment variables to `.env`:
+
+    ```bash
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
+    CLERK_SECRET_KEY=your_clerk_secret_key
+    ```
+
+    Configure ARES as a custom OAuth provider in your Clerk Dashboard:
+    - Provider name: `custom_ares`
+    - Authorization URL: `https://joinares.com/oauth`
+    - Token URL: `https://oauth.joinares.com/oauth/token`
+    - User info URL: `https://oauth.joinares.com/v1/user`
+    - Scopes: `profile usage`
+    - Client ID: `Your ARES Client ID`
+    - Client Secret: `Your ARES Client Secret`
+
+    [Full Clerk setup guide →](/authentication/clerk)
+
+  </Tab>
+
+  <Tab title="Direct OAuth Token">
+    If you already have an OAuth access token from another source:
+
+    ```typescript
+    import { Ares } from 'ares-sdk';
+
+    const client = new Ares({
+      accessToken: 'your_oauth_access_token',
+    });
+    ```
+
+    [Custom OAuth guide →](/authentication/custom-oauth)
+
+  </Tab>
+</Tabs>
+
+## Step 4: Create ARES API route
+
+Create a complete ARES integration with **one line of code** using the SDK helpers:
+
+<CodeGroup>
+
+```typescript Next.js App Router (Recommended)
+// app/api/ares/route.ts
+import { createAresRoutes } from "ares-sdk/lib/api-routes";
+
+// That's it! Full ARES integration in 1 line ✨
+export const { GET, POST } = createAresRoutes();
+
+// Optional: Add app-specific pricing info
+import { pricing } from "@/lib/pricing-config";
+
+const { GET: getAresUser, POST } = createAresRoutes();
+
+export async function GET() {
+  const response = await getAresUser();
+  if (!response.ok) return response;
+
+  const data = await response.json();
+  return Response.json({
+    ...data,
+    pricing: pricing.getSummary(), // Your app's pricing
+  });
+}
+
+export { POST };
+```
+
+```typescript Manual Setup (Alternative)
+// app/api/ares/user/route.ts
+import { Ares } from "ares-sdk";
+import { auth } from "@clerk/nextjs/server";
+import { createAresFromClerkAuth } from "ares-sdk/lib/clerk";
+import { clerkClient } from "@clerk/nextjs/server";
+
+export async function GET() {
+  // Get ARES client from Clerk auth
+  const aresClient = await createAresFromClerkAuth(auth(), {
+    clerkClient: clerkClient(),
+  });
+
+  if (!aresClient) {
+    return Response.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  // Retrieve user information
+  const user = await aresClient.user.retrieve();
+
+  return Response.json({
+    name: user.name,
+    email: user.email,
+    credits: user.credits,
+  });
+}
+```
+
+```typescript Node.js Express
+// routes/ares.js
+import express from "express";
+import { Ares } from "ares-sdk";
+
+const router = express.Router();
+
+router.get("/user", async (req, res) => {
+  // Get OAuth token from your auth middleware
+  const accessToken = req.user.aresToken;
+
+  const client = new Ares({ accessToken });
+
+  try {
+    const user = await client.user.retrieve();
+    res.json({
+      name: user.name,
+      email: user.email,
+      credits: user.credits,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+export default router;
+```
+
+</CodeGroup>
+
+**What this creates:**
+
+- `GET /api/ares` - Returns user's ARES profile and credit balance
+- `POST /api/ares` - Records usage and deducts credits
+- Auto-handles authentication, errors, and validation
+
+## Step 5: Add client-side UI component
+
+Use the React hook to display credits in your UI:
+
+```tsx
+// components/credits-counter.tsx
+"use client";
+
+import { useAres } from "ares-sdk/lib/react";
+
+export function CreditsCounter() {
+  const { user, loading, error } = useAres("/api/ares", {
+    refreshInterval: 300000, // Refresh every 5 minutes
+    revalidateOnFocus: true, // Refresh on window focus
+  });
+
+  if (loading) return <div>Loading credits...</div>;
+  if (error) return <div>Error: {error}</div>;
+  if (!user) return null;
+
+  return (
+    <div>
+      <h2>{user.credits.toLocaleString()} Credits</h2>
+      <p>{user.name}</p>
+    </div>
+  );
+}
+```
+
+**Features included:**
+
+- ✅ Auto-fetches user data on mount
+- ✅ Auto-refreshes periodically
+- ✅ Auto-refreshes on window focus
+- ✅ Built-in loading and error states
+- ✅ Full TypeScript support
+
+## Step 6: Protect endpoints with credits
+
+Wrap any endpoint to require credits before execution:
+
+```typescript
+// app/api/generate-content/route.ts
+import { withCreditsCheck } from "ares-sdk/lib/api-routes";
+
+interface GenerateRequest {
+  prompt: string;
+  quantity: number;
+}
+
+export const POST = withCreditsCheck<GenerateRequest>(
+  {
+    credits: (body) => body.quantity * 10, // 10 credits per item
+    usage: "AI content generation",
+  },
+  async (request, { user, body }) => {
+    // Credits already deducted! ✅
+    // Body already parsed! ✅
+
+    const result = await generateContent(body.prompt, body.quantity);
+
+    return Response.json({
+      success: true,
+      result,
+      credits_remaining: user.credits,
+    });
+  }
+);
+```
+
+**What this does:**
+
+1. Automatically parses request body
+2. Checks user has enough credits
+3. Deducts credits before your code runs
+4. Returns 402 error if insufficient credits
+5. Passes typed body to your handler
+
+<Note>
+  The SDK automatically handles credit checking and deduction. You don't need to
+  manually check credits!
+</Note>
+
+## What's next?
+
+<CardGroup cols={2}>
+  <Card title="SDK Helpers" icon="wand-magic-sparkles" href="/sdk/helpers">
+    Explore all SDK helpers: createAresRoutes(), withCreditsCheck(), useAres()
+  </Card>
+  <Card title="Authentication Setup" icon="key" href="/authentication/clerk">
+    Complete guide to setting up Clerk OAuth integration
+  </Card>
+  <Card title="Complete Examples" icon="book-open" href="/examples/nextjs">
+    Full production-ready examples from real apps
+  </Card>
+  <Card
+    title="Error Handling"
+    icon="triangle-exclamation"
+    href="/sdk/error-handling"
+  >
+    Handle errors gracefully in your application
+  </Card>
+</CardGroup>
+
+## Need help?
+
+<Card
+  title="GitHub Issues"
+  icon="github"
+  href="https://github.com/Pantheon-Technologies-Inc/ares-typescript/issues"
+>
+  Report bugs or request features
+</Card>

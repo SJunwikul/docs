@@ -1,0 +1,428 @@
+---
+title: "Installation"
+description: "Install and set up the ARES TypeScript SDK"
+---
+
+## Package Installation
+
+Install the ARES SDK via your preferred package manager:
+
+<CodeGroup>
+
+```bash npm
+npm install ares-sdk
+```
+
+```bash yarn
+yarn add ares-sdk
+```
+
+```bash pnpm
+pnpm add ares-sdk
+```
+
+```bash bun
+bun add ares-sdk
+```
+
+</CodeGroup>
+
+## Requirements
+
+### Runtime Requirements
+
+The ARES SDK supports the following JavaScript runtimes:
+
+<CardGroup cols={2}>
+  <Card title="Node.js" icon="node-js">
+    **Version 20 LTS or later**
+
+    The SDK requires Node.js 20+ for optimal performance and security.
+  </Card>
+
+  <Card title="Deno" icon="deno">
+    **Version 1.28.0 or later**
+
+    Full support for Deno's modern JavaScript runtime.
+  </Card>
+
+  <Card title="Bun" icon="bread-slice">
+    **Version 1.0 or later**
+
+    Works seamlessly with Bun's fast JavaScript runtime.
+  </Card>
+
+  <Card title="Edge Runtimes" icon="cloud">
+    **Cloudflare Workers, Vercel Edge**
+
+    Compatible with serverless edge environments.
+  </Card>
+</CardGroup>
+
+<Warning>
+  React Native is **not supported** at this time. The SDK is designed for server-side use only.
+</Warning>
+
+### TypeScript Requirements
+
+For TypeScript projects:
+
+- **TypeScript 4.9 or later** is required
+- The SDK includes full type definitions
+- Supports strict mode
+
+## Environment Setup
+
+### 1. Create Environment Variables File
+
+Create a `.env.local` file in your project root:
+
+```bash .env.local
+# ARES Partner Credentials
+ARES_CLIENT_ID=your_partner_client_id
+ARES_CLIENT_SECRET=your_partner_client_secret
+
+# Optional: ARES API URL (defaults to production)
+ARES_BASE_URL=https://oauth.joinares.com
+```
+
+<Warning>
+  **Security:** Never commit `.env.local` to version control. Add it to `.gitignore` immediately.
+</Warning>
+
+### 2. Load Environment Variables
+
+<Tabs>
+  <Tab title="Next.js">
+    Next.js automatically loads `.env.local` - no additional setup needed.
+
+    ```typescript
+    // Access variables directly
+    const clientId = process.env.ARES_CLIENT_ID;
+    ```
+  </Tab>
+
+  <Tab title="Node.js 20+">
+    Use the built-in `--env-file` flag:
+
+    ```bash
+    node --env-file=.env.local your-app.js
+    ```
+
+    Or use `dotenv`:
+
+    ```bash
+    npm install dotenv
+    ```
+
+    ```typescript
+    import 'dotenv/config';
+    ```
+  </Tab>
+
+  <Tab title="Vite">
+    Vite loads `.env.local` automatically with `VITE_` prefix:
+
+    ```bash .env.local
+    VITE_ARES_CLIENT_ID=your_client_id
+    ```
+
+    ```typescript
+    const clientId = import.meta.env.VITE_ARES_CLIENT_ID;
+    ```
+  </Tab>
+</Tabs>
+
+## Basic Import
+
+### ES Modules (Recommended)
+
+```typescript
+import { Ares } from 'ares-sdk';
+
+const client = new Ares({
+  accessToken: 'your_oauth_access_token',
+});
+```
+
+### CommonJS
+
+```javascript
+const { Ares } = require('ares-sdk');
+
+const client = new Ares({
+  accessToken: 'your_oauth_access_token',
+});
+```
+
+### TypeScript with Types
+
+```typescript
+import type {
+  Ares,
+  UserRetrieveResponse,
+  PartnerRecordUsageParams
+} from 'ares-sdk';
+
+const client: Ares = new Ares({
+  accessToken: process.env.ARES_ACCESS_TOKEN!,
+});
+
+const user: UserRetrieveResponse = await client.user.retrieve();
+```
+
+## Importing Clerk Helpers
+
+If using Clerk for authentication, import the helper functions:
+
+```typescript
+import {
+  createAresFromClerk,
+  createAresFromClerkAuth,
+  hasAresConnection
+} from 'ares-sdk/lib/clerk';
+import { clerkClient } from '@clerk/nextjs/server';
+import { auth } from '@clerk/nextjs/server';
+
+const aresClient = await createAresFromClerkAuth(auth(), {
+  clerkClient: clerkClient(),
+});
+```
+
+## Verify Installation
+
+Create a simple test script to verify the SDK is installed correctly:
+
+```typescript test-ares.ts
+import { Ares } from 'ares-sdk';
+
+async function testInstallation() {
+  console.log('Testing ARES SDK installation...');
+
+  // This will fail without a valid token, but confirms the SDK is imported correctly
+  try {
+    const client = new Ares({
+      accessToken: 'test_token',
+    });
+    console.log('✓ ARES SDK imported successfully');
+    console.log('✓ Client instance created');
+  } catch (error) {
+    console.error('✗ SDK installation failed:', error);
+  }
+}
+
+testInstallation();
+```
+
+Run the test:
+
+```bash
+node --env-file=.env.local test-ares.ts
+```
+
+## Framework-Specific Setup
+
+### Next.js App Router
+
+The SDK works out of the box with Next.js App Router. Use in Server Components or API Routes:
+
+```typescript app/api/ares/route.ts
+import { Ares } from 'ares-sdk';
+import { NextRequest } from 'next/server';
+
+export async function GET(request: NextRequest) {
+  const client = new Ares({
+    accessToken: 'user_token',
+  });
+
+  const user = await client.user.retrieve();
+  return Response.json(user);
+}
+```
+
+### Next.js Pages Router
+
+Use in API routes or `getServerSideProps`:
+
+```typescript pages/api/user.ts
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { Ares } from 'ares-sdk';
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  const client = new Ares({
+    accessToken: req.headers.authorization?.replace('Bearer ', ''),
+  });
+
+  const user = await client.user.retrieve();
+  res.json(user);
+}
+```
+
+### Express.js
+
+Install alongside Express:
+
+```bash
+npm install express ares-sdk
+```
+
+```typescript
+import express from 'express';
+import { Ares } from 'ares-sdk';
+
+const app = express();
+
+app.get('/api/user', async (req, res) => {
+  const client = new Ares({
+    accessToken: req.user.aresToken, // From your auth middleware
+  });
+
+  const user = await client.user.retrieve();
+  res.json(user);
+});
+
+app.listen(3000);
+```
+
+### Cloudflare Workers
+
+```typescript
+import { Ares } from 'ares-sdk';
+
+export default {
+  async fetch(request: Request, env: Env) {
+    const client = new Ares({
+      accessToken: env.ARES_ACCESS_TOKEN,
+    });
+
+    const user = await client.user.retrieve();
+    return Response.json(user);
+  },
+};
+```
+
+### Deno
+
+```typescript
+import { Ares } from 'npm:ares-sdk';
+
+const client = new Ares({
+  accessToken: Deno.env.get('ARES_ACCESS_TOKEN'),
+});
+
+const user = await client.user.retrieve();
+console.log(user);
+```
+
+## Troubleshooting Installation
+
+<AccordionGroup>
+  <Accordion title="Module not found errors" icon="circle-exclamation">
+    **Problem:** Cannot find module 'ares-sdk'
+
+    **Solutions:**
+    - Run `npm install` to ensure dependencies are installed
+    - Delete `node_modules` and reinstall: `rm -rf node_modules && npm install`
+    - Check that `ares-sdk` is in your `package.json` dependencies
+  </Accordion>
+
+  <Accordion title="TypeScript errors" icon="code">
+    **Problem:** Type errors or missing type definitions
+
+    **Solutions:**
+    - Ensure TypeScript version is 4.9 or later: `npm install -D typescript@latest`
+    - Check `tsconfig.json` has `"moduleResolution": "node"` or `"bundler"`
+    - Restart your TypeScript server/IDE
+  </Accordion>
+
+  <Accordion title="Runtime errors" icon="triangle-exclamation">
+    **Problem:** SDK works in some environments but not others
+
+    **Solutions:**
+    - Verify you're using Node.js 20+ or compatible runtime
+    - Check that you're using the SDK server-side only (not in browser)
+    - Ensure `fetch` is available (built-in in Node 18+)
+  </Accordion>
+
+  <Accordion title="Import errors with Clerk helpers" icon="user">
+    **Problem:** Cannot import from 'ares-sdk/lib/clerk'
+
+    **Solutions:**
+    - Use the exact path: `ares-sdk/lib/clerk` (not `ares-sdk/clerk`)
+    - Ensure you have `@clerk/nextjs` installed if using Clerk helpers
+    - Check that your bundler supports package exports
+  </Accordion>
+</AccordionGroup>
+
+## Updating the SDK
+
+Check for updates regularly:
+
+```bash
+# Check current version
+npm list ares-sdk
+
+# Update to latest version
+npm update ares-sdk
+
+# Or install specific version
+npm install ares-sdk@0.3.1
+```
+
+<Note>
+  **Latest version: 0.3.1** - Includes new helper functions (`createAresRoutes()`, `withCreditsCheck()`, `useAres()`) that reduce integration code by up to 50%.
+</Note>
+
+## Package Contents
+
+The SDK includes:
+
+- ✅ Full TypeScript type definitions
+- ✅ ES Modules and CommonJS builds
+- ✅ **NEW (v0.3.0+):** Ready-to-use helper functions
+  - `createAresRoutes()` - Complete API route in 1 line
+  - `withCreditsCheck()` - Auto-deduct credits middleware
+  - `useAres()` - React hook for client-side
+  - `createPricing()` - Centralized pricing config
+- ✅ Clerk integration helpers
+- ✅ Error classes and utilities
+- ✅ Platform detection (Node/Deno/Bun)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="SDK Helpers (Recommended)"
+    icon="wand-magic-sparkles"
+    href="/sdk/helpers"
+  >
+    Explore all SDK helpers for rapid integration
+  </Card>
+
+  <Card
+    title="Authentication Setup"
+    icon="key"
+    href="/authentication/overview"
+  >
+    Set up OAuth authentication with Clerk or Auth0
+  </Card>
+
+  <Card
+    title="Basic Usage"
+    icon="play"
+    href="/sdk/basic-usage"
+  >
+    Learn how to initialize the client and make API calls
+  </Card>
+
+  <Card
+    title="Examples"
+    icon="code"
+    href="/examples/nextjs"
+  >
+    See complete working examples
+  </Card>
+</CardGroup>

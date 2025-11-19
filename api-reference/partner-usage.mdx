@@ -1,0 +1,366 @@
+---
+title: "POST /v1/partner/usage"
+description: "Record partner usage and deduct credits"
+---
+
+## Endpoint
+
+```
+POST https://oauth.joinares.com/v1/partner/usage
+```
+
+## Authentication
+
+Requires a valid OAuth 2.0 Bearer token in the Authorization header.
+
+```http
+Authorization: Bearer YOUR_OAUTH_ACCESS_TOKEN
+```
+
+## Request
+
+### Headers
+
+| Header | Required | Description |
+|--------|----------|-------------|
+| `Authorization` | Yes | OAuth 2.0 Bearer token |
+| `Content-Type` | Yes | Must be `application/json` |
+
+### Request Body
+
+```json
+{
+  "client_id": "partner_client_123",
+  "credits": 10,
+  "usage": "Generated 500 words of AI content"
+}
+```
+
+### Body Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `client_id` | string | Yes | Your ARES Partner Client ID |
+| `credits` | number | Yes | Number of credits to deduct (must be positive) |
+| `usage` | string | Yes | Description of what the credits were used for |
+
+<Warning>
+  The `client_id` must match the OAuth token. The API validates that the token belongs to the specified partner application.
+</Warning>
+
+## Response
+
+### Success Response (200 OK)
+
+```json
+{
+  "message": "Success",
+  "usage": {
+    "usage_timestamp": "2024-01-15T10:30:00Z",
+    "user_id": "123e4567-e89b-12d3-a456-426614174000",
+    "client_id": "partner_client_123",
+    "credits_earned": 10,
+    "usage": "Generated 500 words of AI content"
+  }
+}
+```
+
+### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `message` | string | Success message |
+| `usage.usage_timestamp` | string | ISO 8601 timestamp of when usage was recorded |
+| `usage.user_id` | string | User's ARES ID |
+| `usage.client_id` | string | Partner application ID |
+| `usage.credits_earned` | number | Credits deducted from user's account |
+| `usage.usage` | string | Description of usage |
+
+## Error Responses
+
+### 400 Bad Request
+
+Invalid request parameters.
+
+```json
+{
+  "error": "Bad Request",
+  "message": "Invalid parameters: credits must be a positive number"
+}
+```
+
+### 401 Unauthorized
+
+Invalid or missing OAuth token.
+
+```json
+{
+  "error": "Unauthorized",
+  "message": "Invalid authentication token"
+}
+```
+
+### 402 Payment Required
+
+User has insufficient credits.
+
+```json
+{
+  "error": "Insufficient Credits",
+  "message": "User does not have enough credits",
+  "required": 100,
+  "available": 50
+}
+```
+
+### 403 Forbidden
+
+Token has expired or client ID mismatch.
+
+```json
+{
+  "error": "Forbidden",
+  "message": "Token has expired or client_id mismatch"
+}
+```
+
+### 500 Internal Server Error
+
+Server error occurred.
+
+```json
+{
+  "error": "Internal Server Error",
+  "message": "An unexpected error occurred"
+}
+```
+
+## Code Examples
+
+<CodeGroup>
+
+```typescript TypeScript SDK
+import { Ares } from 'ares-sdk';
+
+const client = new Ares({
+  accessToken: 'your_oauth_access_token',
+});
+
+const result = await client.partner.recordUsage({
+  client_id: process.env.ARES_CLIENT_ID!,
+  credits: 10,
+  usage: 'Generated 500 words of AI content',
+});
+
+console.log(result.usage.credits_earned); // 10
+console.log(result.usage.usage_timestamp); // "2024-01-15T10:30:00Z"
+```
+
+```javascript cURL
+curl -X POST https://oauth.joinares.com/v1/partner/usage \
+  -H "Authorization: Bearer YOUR_OAUTH_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_id": "partner_client_123",
+    "credits": 10,
+    "usage": "Generated 500 words of AI content"
+  }'
+```
+
+```javascript Fetch API
+const response = await fetch('https://oauth.joinares.com/v1/partner/usage', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_OAUTH_ACCESS_TOKEN',
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    client_id: 'partner_client_123',
+    credits: 10,
+    usage: 'Generated 500 words of AI content',
+  }),
+});
+
+const result = await response.json();
+```
+
+</CodeGroup>
+
+## Use Cases
+
+### Basic Usage Tracking
+
+```typescript
+const result = await client.partner.recordUsage({
+  client_id: process.env.ARES_CLIENT_ID!,
+  credits: 25,
+  usage: 'Image generation service',
+});
+```
+
+### Check Credits Before Deduction
+
+```typescript
+// Check credits first
+const user = await client.user.retrieve();
+
+if (user.credits < 100) {
+  throw new Error('Insufficient credits');
+}
+
+// Provide service
+const content = await generateContent();
+
+// Deduct credits
+await client.partner.recordUsage({
+  client_id: process.env.ARES_CLIENT_ID!,
+  credits: 100,
+  usage: 'Premium content generation',
+});
+```
+
+### Tiered Pricing
+
+```typescript
+const pricing = {
+  basic: 10,
+  premium: 50,
+  enterprise: 200,
+};
+
+const tier = 'premium';
+
+await client.partner.recordUsage({
+  client_id: process.env.ARES_CLIENT_ID!,
+  credits: pricing[tier],
+  usage: `${tier} tier service`,
+});
+```
+
+### Error Handling
+
+```typescript
+try {
+  await client.partner.recordUsage({
+    client_id: process.env.ARES_CLIENT_ID!,
+    credits: 100,
+    usage: 'Service',
+  });
+} catch (error) {
+  if (error.status === 402) {
+    // User has insufficient credits
+    console.log('Please add more credits');
+  } else if (error.status === 403) {
+    // Token expired
+    console.log('Please sign in again');
+  } else {
+    console.error('Unexpected error:', error);
+  }
+}
+```
+
+## Best Practices
+
+### 1. Always Check Credits First
+
+```typescript
+const user = await client.user.retrieve();
+
+if (user.credits < requiredCredits) {
+  return Response.json(
+    { error: 'Insufficient credits' },
+    { status: 402 }
+  );
+}
+
+// Provide service...
+await client.partner.recordUsage({ /* ... */ });
+```
+
+### 2. Use Descriptive Usage Strings
+
+```typescript
+// ✅ Good
+usage: "Generated 1000-word article with GPT-4"
+
+// ❌ Bad
+usage: "Service"
+```
+
+### 3. Only Deduct After Service Completion
+
+```typescript
+try {
+  const result = await provideExpensiveService();
+
+  // Only deduct if successful
+  await client.partner.recordUsage({
+    client_id: process.env.ARES_CLIENT_ID!,
+    credits: 100,
+    usage: 'Expensive service',
+  });
+
+  return result;
+} catch (error) {
+  // Service failed - don't deduct credits
+  throw error;
+}
+```
+
+### 4. Handle 402 Errors Gracefully
+
+```typescript
+try {
+  await client.partner.recordUsage({ /* ... */ });
+} catch (error) {
+  if (error.status === 402) {
+    // Show user-friendly message
+    return {
+      error: 'INSUFFICIENT_CREDITS',
+      message: 'Please add credits to your ARES account',
+      addCreditsUrl: 'https://joinares.com/credits',
+    };
+  }
+  throw error;
+}
+```
+
+## Rate Limiting
+
+This endpoint is rate-limited to prevent abuse. Exceeding the rate limit will result in a 429 error.
+
+## Transaction History
+
+All usage records are stored and can be viewed in the ARES partner dashboard at [joinares.com](https://joinares.com).
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card
+    title="Get User"
+    href="/api-reference/user"
+  >
+    Retrieve user profile and credits
+  </Card>
+
+  <Card
+    title="SDK Usage Guide"
+    href="/sdk/basic-usage"
+  >
+    Learn how to use the SDK
+  </Card>
+
+  <Card
+    title="Error Handling"
+    href="/sdk/error-handling"
+  >
+    Handle API errors
+  </Card>
+
+  <Card
+    title="Examples"
+    href="/examples/nextjs"
+  >
+    See working examples
+  </Card>
+</CardGroup>

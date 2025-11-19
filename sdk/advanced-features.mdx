@@ -1,0 +1,727 @@
+---
+title: "Advanced Features"
+description: "Retries, timeouts, logging, and other advanced SDK features"
+---
+
+## Automatic Retries
+
+The ARES SDK automatically retries failed requests with exponential backoff.
+
+### Default Retry Behavior
+
+By default, the SDK retries:
+- **Connection errors** (network failures)
+- **408 Request Timeout**
+- **409 Conflict**
+- **429 Rate Limit**
+- **500+ Server errors**
+
+Requests are retried **2 times** by default.
+
+### Configure Global Retries
+
+Set retry behavior when initializing the client:
+
+```typescript
+import { Ares } from 'ares-sdk';
+
+const client = new Ares({
+  accessToken: userToken,
+  maxRetries: 0, // Disable retries
+});
+
+// Or increase retries
+const clientWithRetries = new Ares({
+  accessToken: userToken,
+  maxRetries: 5, // Retry up to 5 times
+});
+```
+
+### Per-Request Retries
+
+Override retry behavior for individual requests:
+
+```typescript
+// Disable retries for this specific request
+const user = await client.user.retrieve({
+  maxRetries: 0,
+});
+
+// More retries for critical operations
+await client.partner.recordUsage(
+  {
+    client_id: process.env.ARES_CLIENT_ID!,
+    credits: 100,
+    usage: 'Important service',
+  },
+  {
+    maxRetries: 5,
+  }
+);
+```
+
+### Custom Retry Logic
+
+For more control, implement your own retry logic:
+
+```typescript
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxAttempts = 3,
+  baseDelay = 1000
+): Promise<T> {
+  let lastError: Error;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error as Error;
+
+      if (attempt < maxAttempts - 1) {
+        // Exponential backoff: 1s, 2s, 4s, 8s...
+        const delay = baseDelay * Math.pow(2, attempt);
+        console.log(`Attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError!;
+}
+
+// Usage
+const user = await retryWithBackoff(
+  () => client.user.retrieve(),
+  3,
+  1000
+);
+```
+
+## Timeouts
+
+### Default Timeout
+
+Requests timeout after **60 seconds (1 minute)** by default.
+
+### Configure Global Timeout
+
+```typescript
+const client = new Ares({
+  accessToken: userToken,
+  timeout: 20 * 1000, // 20 seconds
+});
+```
+
+### Per-Request Timeouts
+
+```typescript
+// Short timeout for quick operations
+const user = await client.user.retrieve({
+  timeout: 5 * 1000, // 5 seconds
+});
+
+// Longer timeout for slow operations
+await client.partner.recordUsage(
+  {
+    client_id: process.env.ARES_CLIENT_ID!,
+    credits: 10,
+    usage: 'Service',
+  },
+  {
+    timeout: 30 * 1000, // 30 seconds
+  }
+);
+```
+
+### Handling Timeout Errors
+
+```typescript
+import { Ares } from 'ares-sdk';
+
+try {
+  const user = await client.user.retrieve({ timeout: 5000 });
+} catch (error) {
+  if (error instanceof Ares.APIConnectionTimeoutError) {
+    console.error('Request timed out');
+    // Retry or show error to user
+  }
+}
+```
+
+## Logging
+
+The SDK includes built-in logging for debugging.
+
+### Log Levels
+
+Available log levels (from most to least verbose):
+
+- `debug` - All HTTP requests/responses with headers and bodies
+- `info` - General informational messages
+- `warn` - Warnings (default)
+- `error` - Errors only
+- `off` - Disable logging
+
+<Warning>
+  At the `debug` level, authentication headers are redacted but request/response bodies may contain sensitive data. Use with caution in production.
+</Warning>
+
+### Configure Logging
+
+<Tabs>
+  <Tab title="Environment Variable">
+    Set the `ARES_LOG` environment variable:
+
+    ```bash .env.local
+    ARES_LOG=debug
+    ```
+
+    ```typescript
+    // Automatically uses ARES_LOG from environment
+    const client = new Ares({ accessToken: userToken });
+    ```
+  </Tab>
+
+  <Tab title="Client Option">
+    Override with client option:
+
+    ```typescript
+    const client = new Ares({
+      accessToken: userToken,
+      logLevel: 'debug', // Overrides ARES_LOG environment variable
+    });
+    ```
+  </Tab>
+</Tabs>
+
+### Custom Logger
+
+Provide your own logger implementation:
+
+<Tabs>
+  <Tab title="Pino">
+    ```typescript
+    import { Ares } from 'ares-sdk';
+    import pino from 'pino';
+
+    const logger = pino();
+
+    const client = new Ares({
+      accessToken: userToken,
+      logger: logger.child({ name: 'ARES' }),
+      logLevel: 'debug',
+    });
+    ```
+  </Tab>
+
+  <Tab title="Winston">
+    ```typescript
+    import { Ares } from 'ares-sdk';
+    import winston from 'winston';
+
+    const logger = winston.createLogger({
+      level: 'info',
+      format: winston.format.json(),
+      transports: [new winston.transports.Console()],
+    });
+
+    const client = new Ares({
+      accessToken: userToken,
+      logger: logger,
+      logLevel: 'info',
+    });
+    ```
+  </Tab>
+
+  <Tab title="Custom">
+    ```typescript
+    const customLogger = {
+      debug: (message: string, ...args: any[]) => console.debug(message, ...args),
+      info: (message: string, ...args: any[]) => console.info(message, ...args),
+      warn: (message: string, ...args: any[]) => console.warn(message, ...args),
+      error: (message: string, ...args: any[]) => console.error(message, ...args),
+    };
+
+    const client = new Ares({
+      accessToken: userToken,
+      logger: customLogger,
+      logLevel: 'debug',
+    });
+    ```
+  </Tab>
+</Tabs>
+
+### Log Output Example
+
+With `logLevel: 'debug'`, you'll see:
+
+```
+[DEBUG] ARES HTTP Request: GET /v1/user
+[DEBUG]   Headers: { Authorization: 'Bearer [REDACTED]', ... }
+[DEBUG] ARES HTTP Response: 200 OK
+[DEBUG]   Body: { id: '...', email: '...', credits: 150 }
+```
+
+## Custom Fetch Implementation
+
+Replace the default `fetch` function with your own implementation.
+
+### Global Polyfill
+
+```typescript
+import fetch from 'node-fetch';
+
+globalThis.fetch = fetch as any;
+
+const client = new Ares({ accessToken: userToken });
+```
+
+### Pass to Client
+
+```typescript
+import fetch from 'node-fetch';
+import { Ares } from 'ares-sdk';
+
+const client = new Ares({
+  accessToken: userToken,
+  fetch: fetch as any,
+});
+```
+
+### Custom Fetch with Interceptors
+
+```typescript
+const customFetch: typeof fetch = async (url, options) => {
+  console.log('Fetching:', url);
+
+  // Add custom headers
+  const modifiedOptions = {
+    ...options,
+    headers: {
+      ...options?.headers,
+      'X-Custom-Header': 'value',
+    },
+  };
+
+  const response = await fetch(url, modifiedOptions);
+
+  console.log('Response:', response.status);
+
+  return response;
+};
+
+const client = new Ares({
+  accessToken: userToken,
+  fetch: customFetch,
+});
+```
+
+## Proxy Configuration
+
+Configure HTTP proxies for the SDK.
+
+<Tabs>
+  <Tab title="Node.js">
+    Use `undici.ProxyAgent`:
+
+    ```typescript
+    import { Ares } from 'ares-sdk';
+    import { ProxyAgent } from 'undici';
+
+    const proxyAgent = new ProxyAgent('http://proxy.example.com:8080');
+
+    const client = new Ares({
+      accessToken: userToken,
+      fetchOptions: {
+        dispatcher: proxyAgent,
+      },
+    });
+    ```
+  </Tab>
+
+  <Tab title="Bun">
+    ```typescript
+    import { Ares } from 'ares-sdk';
+
+    const client = new Ares({
+      accessToken: userToken,
+      fetchOptions: {
+        proxy: 'http://proxy.example.com:8080',
+      },
+    });
+    ```
+  </Tab>
+
+  <Tab title="Deno">
+    ```typescript
+    import { Ares } from 'npm:ares-sdk';
+
+    const httpClient = Deno.createHttpClient({
+      proxy: { url: 'http://proxy.example.com:8080' },
+    });
+
+    const client = new Ares({
+      accessToken: userToken,
+      fetchOptions: {
+        client: httpClient,
+      },
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Accessing Raw Responses
+
+Access the raw `Response` object from `fetch()`.
+
+### Get Response Immediately
+
+Use `.asResponse()` to get the raw response as soon as headers are received:
+
+```typescript
+const response = await client.user.retrieve().asResponse();
+
+console.log(response.status); // 200
+console.log(response.headers.get('X-Request-ID')); // Request ID
+console.log(response.statusText); // OK
+
+// Body not consumed yet - you can process it manually
+const data = await response.json();
+```
+
+### Get Response with Parsed Data
+
+Use `.withResponse()` to get both parsed data and raw response:
+
+```typescript
+const { data: user, response } = await client.user.retrieve().withResponse();
+
+console.log(user.id); // Parsed user data
+console.log(response.status); // 200
+console.log(response.headers.get('X-Request-ID')); // Request ID
+```
+
+### Use Case: Request Tracking
+
+```typescript
+async function trackedRequest<T>(
+  request: () => Promise<T>
+): Promise<T> {
+  const { data, response } = await request().withResponse();
+
+  const requestId = response.headers.get('X-Request-ID');
+  const responseTime = response.headers.get('X-Response-Time');
+
+  console.log('Request ID:', requestId);
+  console.log('Response Time:', responseTime);
+
+  // Log to monitoring service
+  await logToMonitoring({
+    requestId,
+    responseTime,
+    status: response.status,
+  });
+
+  return data;
+}
+
+const user = await trackedRequest(() => client.user.retrieve());
+```
+
+## Request Options
+
+Configure fetch options for all requests or per-request.
+
+### Global Fetch Options
+
+```typescript
+const client = new Ares({
+  accessToken: userToken,
+  fetchOptions: {
+    // Standard RequestInit options
+    cache: 'no-cache',
+    credentials: 'include',
+    headers: {
+      'X-Custom-Header': 'value',
+    },
+  },
+});
+```
+
+### Per-Request Fetch Options
+
+```typescript
+const user = await client.user.retrieve({
+  fetchOptions: {
+    signal: AbortSignal.timeout(5000), // Abort after 5 seconds
+  },
+});
+```
+
+### Request Cancellation
+
+Use `AbortController` to cancel requests:
+
+```typescript
+const controller = new AbortController();
+
+// Start request
+const userPromise = client.user.retrieve({
+  fetchOptions: {
+    signal: controller.signal,
+  },
+});
+
+// Cancel after 3 seconds
+setTimeout(() => controller.abort(), 3000);
+
+try {
+  const user = await userPromise;
+} catch (error) {
+  if (error.name === 'AbortError') {
+    console.log('Request was cancelled');
+  }
+}
+```
+
+## Base URL Configuration
+
+Override the ARES API base URL (useful for testing or custom deployments).
+
+```typescript
+const client = new Ares({
+  accessToken: userToken,
+  baseURL: 'https://oauth.joinares.com', // Default
+});
+
+// For testing with local server
+const testClient = new Ares({
+  accessToken: testToken,
+  baseURL: 'http://localhost:8080',
+});
+```
+
+## TypeScript Advanced Types
+
+### Working with Response Types
+
+```typescript
+import type {
+  UserRetrieveResponse,
+  PartnerRecordUsageParams,
+  UsageResponse,
+} from 'ares-sdk';
+
+// Extend response types
+interface ExtendedUserData extends UserRetrieveResponse {
+  lastActive: Date;
+  preferences: Record<string, any>;
+}
+
+async function getExtendedUser(): Promise<ExtendedUserData> {
+  const user = await client.user.retrieve();
+
+  return {
+    ...user,
+    lastActive: new Date(),
+    preferences: {},
+  };
+}
+```
+
+### Type-Safe Request Builders
+
+```typescript
+class AresRequestBuilder {
+  constructor(private client: Ares) {}
+
+  async getUserCredits(): Promise<number> {
+    const user = await this.client.user.retrieve();
+    return user.credits;
+  }
+
+  async deductCredits(
+    amount: number,
+    description: string
+  ): Promise<UsageResponse> {
+    return await this.client.partner.recordUsage({
+      client_id: process.env.ARES_CLIENT_ID!,
+      credits: amount,
+      usage: description,
+    });
+  }
+}
+
+const builder = new AresRequestBuilder(client);
+const credits = await builder.getUserCredits();
+```
+
+## Performance Optimization
+
+### Connection Pooling (Node.js)
+
+```typescript
+import { Agent } from 'undici';
+
+const agent = new Agent({
+  connections: 10, // Max concurrent connections
+  keepAliveTimeout: 60000, // Keep connections alive
+});
+
+const client = new Ares({
+  accessToken: userToken,
+  fetchOptions: {
+    dispatcher: agent,
+  },
+});
+```
+
+### Request Batching
+
+Batch multiple operations efficiently:
+
+```typescript
+async function batchOperations(client: Ares, userIds: string[]) {
+  // Reuse client instance across operations
+  const results = await Promise.all(
+    userIds.map(async (userId) => {
+      // Each gets a separate token but reuses client
+      const userClient = new Ares({ accessToken: await getTokenForUser(userId) });
+      return await userClient.user.retrieve();
+    })
+  );
+
+  return results;
+}
+```
+
+### Response Caching
+
+Cache responses to reduce API calls:
+
+```typescript
+const cache = new Map<string, { data: any; expires: number }>();
+
+async function getCachedUser(client: Ares, userId: string) {
+  const cached = cache.get(userId);
+
+  if (cached && cached.expires > Date.now()) {
+    return cached.data;
+  }
+
+  const user = await client.user.retrieve();
+
+  cache.set(userId, {
+    data: user,
+    expires: Date.now() + 60000, // Cache for 1 minute
+  });
+
+  return user;
+}
+```
+
+## Debugging Tips
+
+### Enable Verbose Logging
+
+```typescript
+const client = new Ares({
+  accessToken: userToken,
+  logLevel: 'debug',
+});
+
+// All requests and responses will be logged
+await client.user.retrieve();
+```
+
+### Inspect Request/Response
+
+```typescript
+const { data, response } = await client.user.retrieve().withResponse();
+
+console.log('Request URL:', response.url);
+console.log('Status:', response.status);
+console.log('Headers:', Object.fromEntries(response.headers.entries()));
+console.log('Data:', data);
+```
+
+### Test Error Scenarios
+
+```typescript
+// Test with invalid token
+const testClient = new Ares({ accessToken: 'invalid_token' });
+
+try {
+  await testClient.user.retrieve();
+} catch (error) {
+  console.log('Expected error:', error.message);
+}
+```
+
+## Environment-Specific Configuration
+
+### Development vs Production
+
+```typescript
+const client = new Ares({
+  accessToken: userToken,
+  baseURL: process.env.NODE_ENV === 'production'
+    ? 'https://oauth.joinares.com'
+    : 'http://localhost:8080',
+  logLevel: process.env.NODE_ENV === 'production' ? 'warn' : 'debug',
+  timeout: process.env.NODE_ENV === 'production' ? 60000 : 5000,
+});
+```
+
+### Configuration Helper
+
+```typescript
+function createAresClient(accessToken: string) {
+  const isProd = process.env.NODE_ENV === 'production';
+
+  return new Ares({
+    accessToken,
+    baseURL: process.env.ARES_BASE_URL || 'https://oauth.joinares.com',
+    logLevel: isProd ? 'error' : 'debug',
+    timeout: parseInt(process.env.ARES_TIMEOUT || '60000'),
+    maxRetries: parseInt(process.env.ARES_MAX_RETRIES || '2'),
+  });
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Examples"
+    icon="code"
+    href="/examples/nextjs"
+  >
+    See complete working examples
+  </Card>
+
+  <Card
+    title="API Reference"
+    icon="book"
+    href="/api-reference/introduction"
+  >
+    Complete API documentation
+  </Card>
+
+  <Card
+    title="Error Handling"
+    icon="triangle-exclamation"
+    href="/sdk/error-handling"
+  >
+    Handle errors gracefully
+  </Card>
+
+  <Card
+    title="GitHub"
+    icon="github"
+    href="https://github.com/Pantheon-Technologies-Inc/ares-typescript"
+  >
+    View SDK source code
+  </Card>
+</CardGroup>
