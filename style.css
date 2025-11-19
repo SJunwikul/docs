@@ -1,0 +1,6 @@
+/* Custom logo styling - increase size by 1.5x */
+#navbar img {
+  height: 50px !important; /* Adjust this value as needed - default is typically ~40px */
+  width: auto !important; /* Maintains aspect ratio */
+  max-height: 50px !important;
+}

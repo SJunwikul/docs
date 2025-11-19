@@ -1,11 +1,15 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
+  "theme": "aspen",
   "name": "ARES Documentation",
   "colors": {
     "primary": "#6366F1",
     "light": "#818CF8",
     "dark": "#4F46E5"
+  },
+  "appearance": {
+    "default": "dark",
+    "strict": true
   },
   "favicon": "/favicon.svg",
   "navigation": {
@@ -15,10 +19,7 @@
         "groups": [
           {
             "group": "Getting Started",
-            "pages": [
-              "index",
-              "quickstart"
-            ]
+            "pages": ["index", "quickstart"]
           },
           {
             "group": "Authentication",
@@ -41,11 +42,7 @@
           },
           {
             "group": "Examples",
-            "pages": [
-              "examples/nextjs",
-              "examples/node",
-              "examples/api-routes"
-            ]
+            "pages": ["examples/nextjs", "examples/node", "examples/api-routes"]
           }
         ]
       },
@@ -54,16 +51,11 @@
         "groups": [
           {
             "group": "API Overview",
-            "pages": [
-              "api-reference/introduction"
-            ]
+            "pages": ["api-reference/introduction"]
           },
           {
             "group": "Endpoints",
-            "pages": [
-              "api-reference/user",
-              "api-reference/partner-usage"
-            ]
+            "pages": ["api-reference/user", "api-reference/partner-usage"]
           }
         ]
       }
@@ -102,15 +94,15 @@
   },
   "contextual": {
     "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "perplexity",
+      "mcp",
+      "cursor",
+      "vscode"
+    ]
   },
   "footer": {
     "socials": {
