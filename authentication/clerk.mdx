@@ -153,7 +153,9 @@ Once configured, the Clerk `<SignIn />` component will automatically show "Conti
 ## Step 5: Create API Routes with ARES SDK
 
 <Note>
-  The examples below use **Next.js App Router**. For other frameworks, see [Node.js examples](/examples/node) or [API Routes guide](/examples/api-routes).
+  The examples below use **Next.js App Router**. For other frameworks, see
+  [Node.js examples](/examples/node) or [API Routes
+  guide](/examples/api-routes).
 </Note>
 
 ### Using the Clerk Helper Function
@@ -245,7 +247,7 @@ Creates an ARES client from Clerk's `auth()` result. Returns `null` if user is n
 ```typescript
 const aresClient = await createAresFromClerkAuth(auth(), {
   clerkClient: clerkClient(),
-  provider: "custom_ares", // optional, defaults to 'custom_ares'
+  provider: "custom_ares",
 });
 ```
 
@@ -295,7 +297,8 @@ if (result.success) {
 ## Client-Side Integration
 
 <Note>
-  The examples below use **React**. The Clerk helper functions work with any Node.js framework, but these client-side examples are React-specific.
+  The examples below use **React**. The Clerk helper functions work with any
+  Node.js framework, but these client-side examples are React-specific.
 </Note>
 
 ### Check if User Has ARES Connected

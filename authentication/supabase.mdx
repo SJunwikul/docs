@@ -1,0 +1,596 @@
+---
+title: "Supabase Integration"
+description: "Complete guide to integrating ARES with Supabase using Clerk as a third-party auth provider"
+---
+
+## Overview
+
+Supabase doesn't natively support custom OAuth providers yet, so we use **Clerk as a third-party authentication provider** to enable "Sign in with ARES" alongside Supabase.
+
+This guide covers:
+
+- Setting up Clerk with Supabase third-party auth
+- Configuring ARES as thec only OAuth provider in Clerk
+- Syncing users to Supabase via webhooks
+- Adding the "Sign in with ARES" button
+- Using the ARES SDK with Supabase
+
+<Note>
+  **Prerequisites**: You need an ARES Partner Client ID and Secret. Contact
+  admin@joinares.com to become a partner.
+</Note>
+
+<Warning>
+  This guide will be updated once Supabase officially supports custom OAuth
+  providers natively. For now, Clerk serves as the intermediary for ARES
+  authentication.
+</Warning>
+
+## Architecture Overview
+
+This integration uses a hybrid approach:
+
+<CardGroup cols={2}>
+  <Card title="Clerk" icon="user-shield">
+    Handles ARES OAuth authentication and user sessions
+  </Card>
+  <Card title="Supabase" icon="database">
+    Handles your application data and database operations
+  </Card>
+</CardGroup>
+
+```
+User → Sign in with ARES → Clerk OAuth → Webhook → Supabase Users Table
+                              ↓
+                         ARES SDK API Calls
+```
+
+## Step 1: Set Up Clerk with Supabase
+
+### Create Clerk Production Instance
+
+1. Go to [clerk.com](https://clerk.com) and create a **production** instance
+2. Navigate to **Clerk Dashboard** → [Supabase Integration](https://dashboard.clerk.com/setup/supabase)
+3. Follow the setup wizard to connect Clerk with Supabase
+4. At the bottom of the page, copy the **"Clerk domain"** - you'll need this in the next step
+
+<Note>
+  Make sure you're using a **production** Clerk instance, not development. The
+  Supabase third-party auth integration requires production credentials.
+</Note>
+
+### Install Dependencies
+
+<CodeGroup>
+
+```bash npm
+npm install @clerk/nextjs ares-sdk svix
+```
+
+```bash yarn
+yarn add @clerk/nextjs ares-sdk svix
+```
+
+```bash pnpm
+pnpm add @clerk/nextjs ares-sdk svix
+```
+
+</CodeGroup>
+
+## Step 2: Add Clerk as Third-Party Auth Provider in Supabase
+
+1. Go to your **Supabase Dashboard**
+2. Navigate to **Authentication** → **Sign In / Providers** → **Third Party Auth**
+3. Click **"Add provider"**
+4. Select **Clerk**
+5. Paste the **Clerk domain** you copied from Step 1
+6. Click **"Create connection"**
+
+This allows Supabase to recognize and trust JWT tokens issued by Clerk.
+
+## Step 3: Configure ARES as OAuth Provider in Clerk
+
+Now configure Clerk to use **only** ARES for authentication.
+
+### Add ARES Custom OAuth Provider
+
+1. Go to your Clerk Dashboard
+2. Navigate to **Configure** → **SSO Connections**
+3. Click **Add connection** → **For all users**
+4. Choose **Custom provider** → **Use manual configuration**
+5. Use these exact settings:
+
+| Setting               | Value                                      |
+| --------------------- | ------------------------------------------ |
+| **Name**              | ARES                                       |
+| **Key**               | `ares` (will show up as oauth_custom_ares) |
+| **Authorization URL** | `https://joinares.com/oauth`               |
+| **Token URL**         | `https://oauth.joinares.com/oauth/token`   |
+| **User info URL**     | `https://oauth.joinares.com/v1/user`       |
+| **Client ID**         | Your ARES Partner Client ID                |
+| **Client Secret**     | Your ARES Partner Client Secret            |
+
+6. Click **Add connection**
+
+### Attribute Mapping
+
+Configure these attribute mappings:
+
+- **User ID** → `id`
+- **Avatar URL** → `picture`
+- **Full name** → `name`
+- **First name** → `name`
+- **Email address** → `email`
+- **Email address verified** → `True`
+
+### Register Redirect URI
+
+1. Copy the **Authorized redirect URI** from your Clerk configuration (ends in .../v1/oauth_callback)
+2. Email it to **admin@joinares.com** along with your Client ID
+3. **Do NOT enable the connection** until you receive confirmation from ARES (it won't work)
+
+### Disable Other Sign-In Methods
+
+To ensure users can **only** sign in with ARES:
+
+1. Go to **Configure** → **Email, Phone, Username**
+2. Disable **Email address** sign-in
+3. Go to **Configure** → **SSO Connections**
+4. Remove or disable **Google**, **GitHub**, and any other providers
+
+<Warning>
+  Only enable the ARES OAuth connection after receiving confirmation from
+  admin@joinares.com that your redirect URI has been registered.
+</Warning>
+
+### Logo
+
+Download the ARES logo to add to your custom ARES OAuth:
+
+<img
+  src="/images/ARES-logo.png"
+  alt="ARES Logo"
+  style={{ maxWidth: "150px", margin: "20px 0" }}
+/>
+
+<a href="/images/ARES-logo.png" download="ARES-logo.png">
+  <button
+    style={{
+      padding: "10px 20px",
+      backgroundColor: "#4F46E5",
+      color: "white",
+      border: "none",
+      borderRadius: "6px",
+      cursor: "pointer",
+      fontSize: "14px",
+      fontWeight: "500",
+    }}
+  >
+    Download full size
+  </button>
+</a>
+
+## Step 4: Set Up Webhooks for User Sync
+
+When users sign in with ARES via Clerk, you need to sync them to your Supabase users table via webhooks.
+
+### Create Webhook Endpoint
+
+1. Go to **Clerk Dashboard** → **Configure** → **Webhooks**
+2. Click **Add Endpoint**
+3. Enter your webhook URL: `https://yourdomain.com/api/webhooks/clerk`
+4. Select these events:
+   - `user.created`
+   - `user.updated`
+   - `user.deleted`
+5. Copy the **Signing Secret** for verification
+
+### Environment Variables
+
+Add the webhook secret to your environment:
+
+```bash .env.local
+# Clerk
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_...
+CLERK_SECRET_KEY=sk_live_...
+CLERK_WEBHOOK_SECRET=whsec_...
+
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+
+# ARES
+ARES_CLIENT_ID=your_partner_client_id
+ARES_CLIENT_SECRET=your_partner_client_secret
+```
+
+### Implement Webhook Handler
+
+Create the webhook endpoint to sync users to Supabase:
+
+```typescript app/api/webhooks/clerk/route.ts
+import { Webhook } from "svix";
+import { headers } from "next/headers";
+import { WebhookEvent } from "@clerk/nextjs/server";
+import { createClient } from "@supabase/supabase-js";
+
+// Create admin client with service role key
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+export async function POST(req: Request) {
+  const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
+
+  if (!WEBHOOK_SECRET) {
+    throw new Error("Please add CLERK_WEBHOOK_SECRET to .env.local");
+  }
+
+  // Get the headers
+  const headerPayload = await headers();
+  const svix_id = headerPayload.get("svix-id");
+  const svix_timestamp = headerPayload.get("svix-timestamp");
+  const svix_signature = headerPayload.get("svix-signature");
+
+  if (!svix_id || !svix_timestamp || !svix_signature) {
+    return new Response("Missing svix headers", { status: 400 });
+  }
+
+  // Get the body
+  const payload = await req.json();
+  const body = JSON.stringify(payload);
+
+  // Verify the webhook
+  const wh = new Webhook(WEBHOOK_SECRET);
+  let evt: WebhookEvent;
+
+  try {
+    evt = wh.verify(body, {
+      "svix-id": svix_id,
+      "svix-timestamp": svix_timestamp,
+      "svix-signature": svix_signature,
+    }) as WebhookEvent;
+  } catch (err) {
+    console.error("Webhook verification failed:", err);
+    return new Response("Verification failed", { status: 400 });
+  }
+
+  const eventType = evt.type;
+
+  if (eventType === "user.created" || eventType === "user.updated") {
+    const { id, email_addresses, first_name, last_name, image_url } = evt.data;
+    const email = email_addresses?.[0]?.email_address;
+
+    if (!email) {
+      return new Response("No email found", { status: 400 });
+    }
+
+    const userData = {
+      id,
+      email,
+      first_name: first_name || null,
+      last_name: last_name || null,
+      full_name: [first_name, last_name].filter(Boolean).join(" ") || null,
+      avatar_url: image_url || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Upsert user to Supabase
+    const { error } = await supabaseAdmin
+      .from("users")
+      .upsert(userData, { onConflict: "id" });
+
+    if (error) {
+      console.error("Failed to upsert user:", error);
+      return new Response("Error syncing user", { status: 500 });
+    }
+
+    console.log(
+      `User ${eventType === "user.created" ? "created" : "updated"}:`,
+      id
+    );
+  }
+
+  if (eventType === "user.deleted") {
+    const { id } = evt.data;
+
+    if (!id) {
+      return new Response("No user ID found", { status: 400 });
+    }
+
+    const { error } = await supabaseAdmin.from("users").delete().eq("id", id);
+
+    if (error) {
+      console.error("Failed to delete user:", error);
+      return new Response("Error deleting user", { status: 500 });
+    }
+
+    console.log("User deleted:", id);
+  }
+
+  return new Response("Webhook processed", { status: 200 });
+}
+```
+
+<Note>
+  This example syncs to a `users` table. Adjust the schema and field mappings
+  based on your Supabase database structure.
+</Note>
+
+### Create Users Table in Supabase
+
+<Note>
+  You can skip this step if you already have a users table in Supabase, but
+  you'll need to modify the webhook snippet from the previous section to match
+  your schema.
+</Note>
+
+Run this SQL in your Supabase SQL Editor to create the users table:
+
+```sql
+CREATE TABLE users (
+  id TEXT PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  first_name TEXT,
+  last_name TEXT,
+  full_name TEXT,
+  avatar_url TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Enable Row Level Security
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+-- Policy for users to read their own data
+CREATE POLICY "Users can read own data" ON users
+  FOR SELECT USING (auth.uid()::text = id);
+```
+
+## Step 5: Add Sign In with ARES Button
+
+### Simple Sign-In Button
+
+If you just want the ARES sign-in button without other Clerk UI elements (you can add this to your existing sign in page):
+
+```typescript components/SignInWithAres.tsx
+"use client";
+
+import { SignIn } from "@clerk/nextjs";
+
+export function SignInWithAres() {
+  return (
+    <div className="[&_.cl-footer]:hidden [&_.cl-header]:hidden [&_.cl-dividerRow]:hidden [&_.cl-alternativeMethods]:hidden">
+      <SignIn
+        appearance={{
+          elements: {
+            rootBox: "w-full",
+            card: "bg-transparent shadow-none w-full p-0 m-0",
+            cardBox: "shadow-none p-0 m-0 w-full",
+            socialButtonsBlockButton: {
+              backgroundColor: "#ffffff",
+              color: "#000000",
+              height: "48px",
+              fontWeight: 600,
+              width: "100%",
+              "&:hover": {
+                backgroundColor: "#f3f4f6",
+              },
+            },
+            socialButtonsBlockButtonText: "text-black font-semibold",
+            footer: "hidden",
+            header: "hidden",
+            dividerRow: "hidden",
+            alternativeMethods: "hidden",
+            main: "gap-0 p-0 m-0 w-full",
+            socialButtonsBlock: "gap-0 m-0 w-full",
+          },
+          layout: {
+            socialButtonsPlacement: "top",
+            socialButtonsVariant: "blockButton",
+          },
+        }}
+        routing="hash"
+      />
+    </div>
+  );
+}
+```
+
+## Step 6: Configure Middleware
+
+### If Using Only Clerk for Auth
+
+If you're **replacing** Supabase auth entirely with Clerk + ARES (standard Clerk middleware):
+
+```typescript middleware.ts
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+
+const isPublicRoute = createRouteMatcher([
+  "/",
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  "/api/webhooks(.*)",
+]);
+
+export default clerkMiddleware(async (auth, request) => {
+  if (!isPublicRoute(request)) {
+    await auth.protect();
+  }
+});
+
+export const config = {
+  matcher: [
+    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/(api|trpc)(.*)",
+  ],
+};
+```
+
+### If Using Both Clerk and Supabase Auth
+
+If you need to maintain **both** auth systems (e.g., migrating existing users):
+
+```typescript middleware.ts
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
+import { createMiddlewareClient } from "@supabase/auth-helpers-nextjs";
+
+const isPublicRoute = createRouteMatcher([
+  "/",
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  "/api/webhooks(.*)",
+]);
+
+export default clerkMiddleware(async (auth, request) => {
+  // Check Clerk auth first
+  const clerkAuth = await auth();
+
+  if (clerkAuth.userId) {
+    // User is authenticated with Clerk
+    return NextResponse.next();
+  }
+
+  // Fall back to Supabase auth for existing users
+  const res = NextResponse.next();
+  const supabase = createMiddlewareClient({ req: request, res });
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session && !isPublicRoute(request)) {
+    // Not authenticated with either - redirect to sign in
+    return NextResponse.redirect(new URL("/sign-in", request.url));
+  }
+
+  return res;
+});
+
+export const config = {
+  matcher: [
+    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/(api|trpc)(.*)",
+  ],
+};
+```
+
+<Note>
+  The dual-auth middleware is for migration scenarios. For new projects, we
+  recommend using only Clerk for authentication.
+</Note>
+
+## Step 7: Use the ARES SDK
+
+Create an API route to handle ARES operations:
+
+```typescript app/api/ares/route.ts
+import { createAresRoutes } from "ares-sdk/lib/api-routes";
+
+// Full ARES integration in 1 line
+export const { GET, POST } = createAresRoutes();
+```
+
+This creates:
+- `GET /api/ares` - Returns user's ARES profile and credit balance
+- `POST /api/ares` - Records usage and deducts credits
+
+### Charge Credits for Your Services
+
+```typescript app/api/generate/route.ts
+import { withCreditsCheck } from "ares-sdk/lib/api-routes";
+
+export const POST = withCreditsCheck(
+  {
+    credits: 50, // Cost in credits
+    usage: "AI content generation",
+  },
+  async (request, { user, body }) => {
+    const result = await generateContent(body.prompt);
+    return Response.json({ result });
+  }
+);
+```
+
+The SDK automatically checks balance and deducts credits for you.
+
+See the [Quickstart](/quickstart) for complete examples including client-side UI components.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Webhook not syncing users" icon="webhook">
+    **Possible causes:**
+    - Webhook URL is incorrect
+    - Signing secret mismatch
+    - Supabase service role key missing
+
+    **Solution:**
+    - Verify the webhook URL is publicly accessible
+    - Check that `CLERK_WEBHOOK_SECRET` matches the Clerk dashboard
+    - Ensure `SUPABASE_SERVICE_ROLE_KEY` is set (not the anon key)
+    - Check your server logs for error messages
+
+  </Accordion>
+
+  <Accordion title="User not found in Supabase after sign-in" icon="database">
+    **Possible causes:**
+    - Webhook not configured correctly
+    - Users table doesn't exist
+    - RLS policies blocking inserts
+
+    **Solution:**
+    - Verify webhook is receiving events in Clerk dashboard
+    - Create the users table with the provided SQL
+    - The webhook uses service role key which bypasses RLS
+
+  </Accordion>
+
+  <Accordion title="ARES OAuth not appearing" icon="key">
+    **Possible causes:**
+    - Other sign-in methods still enabled
+    - ARES connection not enabled
+    - Redirect URI not registered
+
+    **Solution:**
+    - Disable all other SSO connections in Clerk
+    - Verify you received confirmation from admin@joinares.com
+    - Enable the ARES connection in Clerk dashboard
+
+  </Accordion>
+
+  <Accordion title="Middleware conflicts" icon="shield-exclamation">
+    **Possible causes:**
+    - Both Clerk and Supabase middleware running
+    - Route matcher not configured correctly
+
+    **Solution:**
+    - Use the dual-auth middleware only if needed
+    - Ensure public routes include `/api/webhooks`
+    - Check that the matcher excludes static files
+
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Clerk Helper Functions" icon="code" href="/sdk/helpers">
+    Learn about all ARES SDK Clerk helpers
+  </Card>
+  <Card title="SDK Usage Guide" icon="book" href="/sdk/basic-usage">
+    Complete guide to ARES SDK features
+  </Card>
+  <Card
+    title="Error Handling"
+    icon="triangle-exclamation"
+    href="/sdk/error-handling"
+  >
+    Handle errors gracefully
+  </Card>
+  <Card title="Pricing Guide" icon="coins" href="/pricing">
+    Understand credit costs and revenue
+  </Card>
+</CardGroup>
