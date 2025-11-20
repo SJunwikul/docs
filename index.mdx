@@ -38,16 +38,11 @@ description: "Integrate ARES cross-app credit wallet into your AI application an
 
 ## How It Works
 
-Integrate ARES to accept credit-based payments from a growing user base:
+When a user signs in to your app with ARES, you get an access token. Use that token to call our APIs - check their balance, deduct credits, and get paid.
 
-1. **User signs in with ARES** - Your app redirects to ARES for authentication (like "Sign in with Google")
-2. **User authorizes your app** - Grants permission to spend their ARES credits in your app
-3. **Receive OAuth token** - ARES redirects back with an authorization code
-4. **Provide your service** - User accesses your AI features, generations, or API calls
-5. **Deduct credits & earn revenue** - Use the SDK to track usage and deduct credits from the user's ARES wallet
-6. **Get paid** - ARES pays you $0.0018 per credit spent by ARES users.
+Different auth frameworks (Clerk, Auth0, etc.) handle tokens differently. We have [guides for all of them](/authentication/overview).
 
-**You earn revenue every time an ARES user consumes your services.**
+**You earn $0.0018 for every credit spent in your app.**
 
 ## Quick Example
 
@@ -96,6 +91,7 @@ await client.partner.recordUsage({
   </Accordion>
 
 {" "}
+
 <Accordion title="OAuth Access Tokens" icon="key">
   Users authenticate via "Sign in with ARES" (OAuth 2.0). The access token
   represents their ARES account and allows you to check their credit balance and
@@ -103,6 +99,7 @@ await client.partner.recordUsage({
 </Accordion>
 
 {" "}
+
 <Accordion title="Partner Client ID" icon="id-card">
   When you register as an ARES partner, you receive a Client ID and Client
   Secret. These identify your application and enable you to receive revenue from
@@ -110,6 +107,7 @@ await client.partner.recordUsage({
 </Accordion>
 
 {" "}
+
 <Accordion title="Flexible Pricing" icon="chart-line">
   You control your pricing - charge per API call, per generation, per feature,
   or any model that fits your app. ARES handles the credit transactions.

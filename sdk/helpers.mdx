@@ -5,10 +5,10 @@ description: "Ready-to-use helper functions for common ARES integration patterns
 
 ## Overview
 
-The ARES SDK v0.3.0+ includes powerful helper functions that dramatically simplify integration. These helpers handle authentication, credit management, error handling, and more automatically.
+The ARES SDK includes powerful helper functions that dramatically simplify integration. These helpers handle authentication, credit management, error handling, and more automatically.
 
 <Note>
-  **New in v0.3.0**: These helpers reduce integration code by up to 50% compared to manual implementation.
+  These helpers reduce integration code by up to 50% compared to manual implementation.
 </Note>
 
 ## Server-Side Helpers
@@ -105,7 +105,7 @@ export { POST };
 
 Middleware that protects API routes by automatically checking and deducting credits **before** your code runs.
 
-**Key Features (v0.3.0+):**
+**Key Features:**
 - ✅ Auto-parses request body (no more `request.clone()` needed!)
 - ✅ Type-safe with TypeScript generics
 - ✅ Automatic credit checking and deduction
@@ -163,7 +163,7 @@ export const POST = withCreditsCheck<GenerateRequest>(
 );
 ```
 
-**Before v0.3.0 (Manual Cloning):**
+**Old Pattern (Manual Cloning):**
 ```typescript
 // ❌ Old pattern - required manual request cloning
 credits: async (request) => {
@@ -173,7 +173,7 @@ credits: async (request) => {
 }
 ```
 
-**After v0.3.0 (Automatic Parsing):**
+**New Pattern (Automatic Parsing):**
 ```typescript
 // ✅ New pattern - SDK handles parsing automatically
 credits: (body) => body.quantity * 10

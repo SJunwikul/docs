@@ -49,7 +49,7 @@ ARES_CLIENT_SECRET=your_partner_client_secret
 
 ## Step 3: Set up authentication
 
-Choose your authentication method (we have guides for other frameworks [here](/authentication/overview)).
+Choose your authentication method (guides for other frameworks are [here](/authentication/overview#integration-options)).
 We recommend Clerk for the easiest setup:
 
 <Tabs>
@@ -67,16 +67,7 @@ We recommend Clerk for the easiest setup:
     CLERK_SECRET_KEY=your_clerk_secret_key
     ```
 
-    Configure ARES as a custom OAuth provider in your Clerk Dashboard:
-    - Provider name: `custom_ares`
-    - Authorization URL: `https://joinares.com/oauth`
-    - Token URL: `https://oauth.joinares.com/oauth/token`
-    - User info URL: `https://oauth.joinares.com/v1/user`
-    - Scopes: `profile usage`
-    - Client ID: `Your ARES Client ID`
-    - Client Secret: `Your ARES Client Secret`
-
-    [Full Clerk setup guide →](/authentication/clerk)
+    Next, follow [this guide](/authentication/clerk#step-3:-configure-ares-as-oauth-provider-in-clerk) to configure ARES as a custom OAuth provider in your Clerk Dashboard
 
   </Tab>
 
@@ -102,30 +93,12 @@ Create a complete ARES integration with **one line of code** using the SDK helpe
 
 <CodeGroup>
 
-```typescript Next.js App Router (Recommended)
+```typescript Next.js + Clerk (Recommended)
 // app/api/ares/route.ts
 import { createAresRoutes } from "ares-sdk/lib/api-routes";
 
 // That's it! Full ARES integration in 1 line ✨
 export const { GET, POST } = createAresRoutes();
-
-// Optional: Add app-specific pricing info
-import { pricing } from "@/lib/pricing-config";
-
-const { GET: getAresUser, POST } = createAresRoutes();
-
-export async function GET() {
-  const response = await getAresUser();
-  if (!response.ok) return response;
-
-  const data = await response.json();
-  return Response.json({
-    ...data,
-    pricing: pricing.getSummary(), // Your app's pricing
-  });
-}
-
-export { POST };
 ```
 
 ```typescript Manual Setup (Alternative)
@@ -208,13 +181,9 @@ export function CreditsCounter() {
     revalidateOnFocus: true, // Refresh on window focus
   });
 
-  if (loading) return <div>Loading credits...</div>;
-  if (error) return <div>Error: {error}</div>;
-  if (!user) return null;
-
   return (
     <div>
-      <h2>{user.credits.toLocaleString()} Credits</h2>
+      <h2>{user.credits.toLocaleString()} Credits</h2> // User's credit balance
       <p>{user.name}</p>
     </div>
   );
@@ -229,55 +198,45 @@ export function CreditsCounter() {
 - ✅ Built-in loading and error states
 - ✅ Full TypeScript support
 
-## Step 6: Protect endpoints with credits
+## Step 6: Charge user credits
 
-Wrap any endpoint to require credits before execution:
+Add credit billing to any API route - the SDK handles balance checks and deductions for you:
 
 ```typescript
 // app/api/generate-content/route.ts
 import { withCreditsCheck } from "ares-sdk/lib/api-routes";
 
-interface GenerateRequest {
-  prompt: string;
-  quantity: number;
-}
-
-export const POST = withCreditsCheck<GenerateRequest>(
+export const POST = withCreditsCheck(
   {
-    credits: (body) => body.quantity * 10, // 10 credits per item
+    credits: 50, // Cost in credits
     usage: "AI content generation",
   },
   async (request, { user, body }) => {
-    // Credits already deducted! ✅
-    // Body already parsed! ✅
-
-    const result = await generateContent(body.prompt, body.quantity);
-
-    return Response.json({
-      success: true,
-      result,
-      credits_remaining: user.credits,
-    });
+    const result = await generateContent(body.prompt);
+    return Response.json({ result });
   }
 );
 ```
 
-**What this does:**
+**The SDK handles everything for you:**
 
-1. Automatically parses request body
-2. Checks user has enough credits
-3. Deducts credits before your code runs
-4. Returns 402 error if insufficient credits
-5. Passes typed body to your handler
+- Parses the request body automatically
+- Checks user has enough credits
+- Deducts credits before your code runs
+- Returns 402 error if insufficient credits
+- Gives you a typed body in your handler
 
 <Note>
-  The SDK automatically handles credit checking and deduction. You don't need to
-  manually check credits!
+  No manual credit checking needed - just specify the cost and the SDK does the
+  rest.
 </Note>
 
 ## What's next?
 
 <CardGroup cols={2}>
+  <Card title="Pricing Configuration" icon="dollar-sign" href="/pricing">
+    Set up centralized pricing for your app's operations
+  </Card>
   <Card title="SDK Helpers" icon="wand-magic-sparkles" href="/sdk/helpers">
     Explore all SDK helpers: createAresRoutes(), withCreditsCheck(), useAres()
   </Card>

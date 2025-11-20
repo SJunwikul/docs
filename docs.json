@@ -41,6 +41,12 @@
             ]
           },
           {
+            "group": "Configuration",
+            "pages": [
+              "pricing"
+            ]
+          },
+          {
             "group": "Examples",
             "pages": ["examples/nextjs", "examples/node", "examples/api-routes"]
           }

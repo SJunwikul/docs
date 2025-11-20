@@ -1,0 +1,642 @@
+---
+title: "Pricing Configuration"
+description: "Set up and manage pricing for your application's AI operations"
+---
+
+## Overview
+
+The ARES SDK provides a `createPricing()` helper that simplifies pricing management in your application. Define your pricing once, and use it consistently across your entire app.
+
+<Note>
+  **Credit Conversion**: The unit of the values defined below is Credits. Each
+  ARES credit equals $0.0018.
+</Note>
+
+## Step 1: Create pricing configuration
+
+<Note>
+  **Centralized Configuration**: Define all pricing values in one file and
+  reference them throughout your application for consistency and easy updates.
+</Note>
+Create a centralized pricing file that all your routes and components can reference:
+
+```typescript
+// lib/pricing-config.ts
+import { createPricing } from "ares-sdk/lib/pricing";
+
+/**
+ * Define all credit costs for your app's operations
+ * Edit these values to change pricing
+ */
+const PRICING_VALUES = {
+  IMAGE_GENERATION: 50,        // Image generation
+  VIDEO_GENERATION: 250,        // Video generation
+  IMAGE_TO_VIDEO: 500,          // Image to video conversion
+  // ... add more operations as needed
+} as const;
+
+/**
+ * Export typed pricing action names for type safety
+ */
+export type PricingAction = keyof typeof PRICING_VALUES;
+
+/**
+ * Create pricing configuration with helper methods
+ */
+export const pricing = createPricing(PRICING_VALUES);
+```
+
+## Step 2: Use pricing in API routes
+
+Reference your pricing configuration in your protected API routes:
+
+### Fixed Price
+
+```typescript
+// app/api/generate-image/route.ts
+import { withCreditsCheck } from "ares-sdk/lib/api-routes";
+import { pricing } from "@/lib/pricing-config";
+
+export const POST = withCreditsCheck(
+  {
+    credits: pricing.IMAGE_GENERATION, // Fixed cost
+    usage: "Image generation",
+  },
+  async (request, { user, body }) => {
+    const result = await generateImage(body);
+    return Response.json({ result });
+  }
+);
+```
+
+### Variable Price
+
+```typescript
+// app/api/generate-images/route.ts
+import { withCreditsCheck } from "ares-sdk/lib/api-routes";
+import { pricing } from "@/lib/pricing-config";
+
+interface GenerateRequest {
+  prompt: string;
+  quantity: number;
+}
+
+export const POST = withCreditsCheck<GenerateRequest>(
+  {
+    // Calculate credits based on quantity
+    credits: (body) => pricing.IMAGE_GENERATION * body.quantity,
+    usage: (body) => `Generated ${body.quantity} images`,
+  },
+  async (request, { user, body }) => {
+    const results = await generateImages(body.prompt, body.quantity);
+    return Response.json({
+      results,
+      credits_deducted: pricing.IMAGE_GENERATION * body.quantity,
+      credits_remaining: user.credits,
+    });
+  }
+);
+```
+
+### Using pricing.get()
+
+```typescript
+import { pricing } from "@/lib/pricing-config";
+
+// Access pricing via method
+const cost = pricing.get("VIDEO_GENERATION"); // 250
+
+// Or access directly
+const cost2 = pricing.VIDEO_GENERATION; // 250
+```
+
+## Step 3: Display pricing in UI
+
+Use the `getSummary()` method to display pricing information in your frontend:
+
+### Pricing Table Component
+
+```tsx
+// components/pricing-table.tsx
+"use client";
+import { pricing } from "@/lib/pricing-config";
+
+export function PricingTable() {
+  const pricingSummary = pricing.getSummary();
+
+  return (
+    <div className="pricing-table">
+      <h2>Pricing</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Operation</th>
+            <th>Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pricingSummary.map((item) => (
+            <tr key={item.action}>
+              <td>{formatActionName(item.action)}</td>
+              <td>{item.formatted}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Helper to format action names for display
+function formatActionName(action: string): string {
+  return action
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+```
+
+### Pricing Modal Component
+
+```tsx
+// components/pricing-modal.tsx
+"use client";
+import { pricing } from "@/lib/pricing-config";
+
+export function PricingModal() {
+  const summary = pricing.getSummary();
+
+  return (
+    <div className="modal">
+      <h2>Operation Costs</h2>
+      <div className="pricing-grid">
+        {summary.map((item) => (
+          <div key={item.action} className="pricing-item">
+            <h3>{formatActionName(item.action)}</h3>
+            <p className="credit-cost">{item.formatted}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+### Fetch Pricing from API
+
+You can also expose pricing through your API route:
+
+```typescript
+// app/api/ares/route.ts
+import { createAresRoutes } from "ares-sdk/lib/api-routes";
+import { pricing } from "@/lib/pricing-config";
+
+const { GET: getAresUser, POST } = createAresRoutes();
+
+export async function GET() {
+  const response = await getAresUser();
+  if (!response.ok) return response;
+
+  const data = await response.json();
+
+  // Add pricing info to response
+  return Response.json({
+    ...data,
+    pricing: pricing.getSummary(),
+  });
+}
+
+export { POST };
+```
+
+Then fetch it in your component:
+
+```tsx
+"use client";
+import { useAres } from "ares-sdk/lib/react";
+
+export function Dashboard() {
+  const { user, loading } = useAres("/api/ares");
+
+  if (loading || !user) return <Skeleton />;
+
+  return (
+    <div>
+      <h1>Credits: {user.credits}</h1>
+      <PricingDisplay pricing={user.pricing} />
+    </div>
+  );
+}
+```
+
+## Pricing Patterns
+
+### Pattern 1: Simple Fixed Pricing
+
+Best for operations with a single, unchanging cost:
+
+```typescript
+const PRICING_VALUES = {
+  TEXT_GENERATION: 10,
+  IMAGE_ANALYSIS: 25,
+  VIDEO_PROCESSING: 100,
+};
+
+export const pricing = createPricing(PRICING_VALUES);
+
+// Usage
+withCreditsCheck(
+  {
+    credits: pricing.TEXT_GENERATION,
+    usage: "Text generation",
+  },
+  handler
+);
+```
+
+### Pattern 2: Tiered Pricing
+
+Best for operations with quality or size tiers:
+
+```typescript
+const PRICING_VALUES = {
+  IMAGE_SMALL: 5,
+  IMAGE_MEDIUM: 15,
+  IMAGE_LARGE: 30,
+  IMAGE_XLARGE: 60,
+};
+
+export const pricing = createPricing(PRICING_VALUES);
+
+// Usage
+withCreditsCheck<{ size: "small" | "medium" | "large" | "xlarge" }>(
+  {
+    credits: (body) => {
+      const sizeMap = {
+        small: pricing.IMAGE_SMALL,
+        medium: pricing.IMAGE_MEDIUM,
+        large: pricing.IMAGE_LARGE,
+        xlarge: pricing.IMAGE_XLARGE,
+      };
+      return sizeMap[body.size];
+    },
+    usage: (body) => `Generated ${body.size} image`,
+  },
+  handler
+);
+```
+
+### Pattern 3: Quantity-Based Pricing
+
+Best for bulk operations:
+
+```typescript
+const PRICING_VALUES = {
+  PER_IMAGE: 10,
+  PER_VIDEO_SECOND: 5,
+  PER_1000_TOKENS: 1,
+};
+
+export const pricing = createPricing(PRICING_VALUES);
+
+// Usage - Images
+withCreditsCheck<{ quantity: number }>(
+  {
+    credits: (body) => pricing.PER_IMAGE * body.quantity,
+    usage: (body) => `Generated ${body.quantity} images`,
+  },
+  handler
+);
+
+// Usage - Videos
+withCreditsCheck<{ duration: number }>(
+  {
+    credits: (body) => pricing.PER_VIDEO_SECOND * body.duration,
+    usage: (body) => `Generated ${body.duration}s video`,
+  },
+  handler
+);
+
+// Usage - Tokens
+withCreditsCheck<{ tokens: number }>(
+  {
+    credits: (body) =>
+      Math.ceil((body.tokens / 1000) * pricing.PER_1000_TOKENS),
+    usage: (body) => `Processed ${body.tokens} tokens`,
+  },
+  handler
+);
+```
+
+### Pattern 4: Combined Pricing
+
+Best for complex operations with multiple factors:
+
+```typescript
+const PRICING_VALUES = {
+  IMAGE_BASE_DRAFT: 10,
+  IMAGE_BASE_STANDARD: 30,
+  IMAGE_BASE_PRO: 60,
+  UPSCALE_MULTIPLIER: 2,
+  RAW_MODE_ADDON: 10,
+};
+
+export const pricing = createPricing(PRICING_VALUES);
+
+// Usage
+interface ComplexRequest {
+  mode: "draft" | "standard" | "pro";
+  quantity: number;
+  upscale: boolean;
+  rawMode: boolean;
+}
+
+withCreditsCheck<ComplexRequest>(
+  {
+    credits: (body) => {
+      // Base price
+      let cost =
+        body.mode === "draft"
+          ? pricing.IMAGE_BASE_DRAFT
+          : body.mode === "pro"
+          ? pricing.IMAGE_BASE_PRO
+          : pricing.IMAGE_BASE_STANDARD;
+
+      // Apply multipliers
+      if (body.upscale) cost *= pricing.UPSCALE_MULTIPLIER;
+      if (body.rawMode) cost += pricing.RAW_MODE_ADDON;
+
+      // Multiply by quantity
+      return cost * body.quantity;
+    },
+    usage: (body) => {
+      const features = [
+        body.mode,
+        body.upscale && "upscaled",
+        body.rawMode && "raw mode",
+      ]
+        .filter(Boolean)
+        .join(", ");
+
+      return `Generated ${body.quantity} images (${features})`;
+    },
+  },
+  handler
+);
+```
+
+## Best Practices
+
+### ✅ Do
+
+- **Centralize pricing**: Keep all pricing in one file (`lib/pricing-config.ts`)
+- **Use type safety**: Export `PricingAction` type for autocomplete
+- **Document pricing**: Add comments explaining each pricing tier
+- **Use descriptive names**: `IMAGE_GENERATION_DRAFT` is better than `IMG_1`
+- **Version pricing**: Consider adding version numbers if pricing changes frequently
+
+```typescript
+const PRICING_VALUES_V1 = {
+  // Current pricing as of 2025-01-15
+  IMAGE_GENERATION: 50,
+  // ...
+};
+```
+
+### ❌ Don't
+
+- **Don't hardcode credits**: Always reference pricing config
+- **Don't duplicate pricing**: Use the centralized config everywhere
+- **Don't use magic numbers**: Replace `50` with `pricing.IMAGE_GENERATION`
+- **Don't forget to update UI**: When pricing changes, update pricing displays too
+
+## Common Scenarios
+
+### Changing Pricing
+
+To change pricing, simply update the values in `pricing-config.ts`:
+
+```typescript
+// Before
+const PRICING_VALUES = {
+  IMAGE_GENERATION: 50,
+  VIDEO_GENERATION: 250,
+};
+
+// After - Making images cheaper
+const PRICING_VALUES = {
+  IMAGE_GENERATION: 30, // Changed from 50
+  VIDEO_GENERATION: 250,
+};
+```
+
+All routes and components automatically use the new pricing. No need to update code elsewhere!
+
+### Adding New Operations
+
+To add new operations, add them to your pricing config:
+
+```typescript
+const PRICING_VALUES = {
+  // Existing operations
+  IMAGE_GENERATION: 50,
+  VIDEO_GENERATION: 250,
+
+  // New operations
+  IMAGE_BACKGROUND_REMOVAL: 20, // New!
+  TEXT_TO_SPEECH: 5, // New!
+  SPEECH_TO_TEXT: 10, // New!
+} as const;
+```
+
+### Promotional Pricing
+
+Create separate configs for promotions:
+
+```typescript
+// lib/pricing-config.ts
+const BASE_PRICING = {
+  IMAGE_GENERATION: 50,
+  VIDEO_GENERATION: 250,
+};
+
+const PROMO_PRICING = {
+  IMAGE_GENERATION: 25, // 50% off
+  VIDEO_GENERATION: 125, // 50% off
+};
+
+const isPromoActive = () => {
+  const now = new Date();
+  const promoEnd = new Date("2025-02-01");
+  return now < promoEnd;
+};
+
+export const pricing = createPricing(
+  isPromoActive() ? PROMO_PRICING : BASE_PRICING
+);
+```
+
+### A/B Testing Pricing
+
+Test different pricing tiers:
+
+```typescript
+import { createPricing } from "ares-sdk/lib/pricing";
+
+function getPricingForUser(userId: string) {
+  // Simple A/B test based on user ID
+  const variant = userId.charCodeAt(0) % 2 === 0 ? "A" : "B";
+
+  const PRICING_A = {
+    IMAGE_GENERATION: 50,
+    VIDEO_GENERATION: 250,
+  };
+
+  const PRICING_B = {
+    IMAGE_GENERATION: 40, // 20% cheaper
+    VIDEO_GENERATION: 200, // 20% cheaper
+  };
+
+  return createPricing(variant === "A" ? PRICING_A : PRICING_B);
+}
+
+// Usage in route
+export const POST = withCreditsCheck(
+  {
+    credits: (body, user) => {
+      const userPricing = getPricingForUser(user.id);
+      return userPricing.IMAGE_GENERATION;
+    },
+    usage: "Image generation",
+  },
+  handler
+);
+```
+
+## Helper Methods
+
+The `createPricing()` helper provides several useful methods:
+
+### Direct Access
+
+```typescript
+const cost = pricing.IMAGE_GENERATION; // 50
+```
+
+### get() Method
+
+```typescript
+const cost = pricing.get("IMAGE_GENERATION"); // 50
+```
+
+### getSummary() Method
+
+Returns an array of all pricing entries with formatted strings:
+
+```typescript
+const summary = pricing.getSummary();
+// [
+//   { action: 'IMAGE_GENERATION', credits: 50, formatted: '50 credits' },
+//   { action: 'VIDEO_GENERATION', credits: 250, formatted: '250 credits' },
+//   { action: 'IMAGE_TO_VIDEO', credits: 500, formatted: '500 credits' }
+// ]
+```
+
+Perfect for displaying pricing tables in your UI!
+
+## Real-World Example
+
+Here's a complete example from Myjourney, a production app using ARES:
+
+```typescript
+// lib/pricing-config.ts
+import { createPricing } from "ares-sdk/lib/pricing";
+
+const PRICING_VALUES = {
+  IMAGE_GENERATION_DRAFT: 15,
+  IMAGE_GENERATION_STANDARD: 50,
+  IMAGE_GENERATION_RAW: 50,
+  VIDEO_GENERATION_VEO3: 250,
+  VIDEO_GENERATION_VEO2: 200,
+  VIDEO_GENERATION_VEO31_FAST: 500,
+  IMAGE_TO_VIDEO: 500,
+  IMAGE_UPSCALE_2X: 5,
+  IMAGE_UPSCALE_4X: 75,
+} as const;
+
+export type PricingAction = keyof typeof PRICING_VALUES;
+export const pricing = createPricing(PRICING_VALUES);
+```
+
+```typescript
+// app/api/generate-images/route.ts
+import { withCreditsCheck } from "ares-sdk/lib/api-routes";
+import { pricing } from "@/lib/pricing-config";
+
+interface GenerateRequest {
+  prompt: string;
+  quantity: number;
+  mode: "draft" | "standard" | "raw";
+}
+
+export const POST = withCreditsCheck<GenerateRequest>(
+  {
+    credits: (body) => {
+      const basePrice =
+        body.mode === "draft"
+          ? pricing.IMAGE_GENERATION_DRAFT
+          : body.mode === "raw"
+          ? pricing.IMAGE_GENERATION_RAW
+          : pricing.IMAGE_GENERATION_STANDARD;
+      return basePrice * body.quantity;
+    },
+    usage: (body) => `Generated ${body.quantity} ${body.mode} images`,
+  },
+  async (request, { user, body }) => {
+    const images = await generateImages(body);
+    return Response.json({ success: true, images });
+  }
+);
+```
+
+```tsx
+// components/pricing-modal.tsx
+"use client";
+import { pricing } from "@/lib/pricing-config";
+
+export function PricingModal() {
+  return (
+    <div>
+      <h2>Image Generation</h2>
+      <p>Draft: {pricing.IMAGE_GENERATION_DRAFT} credits</p>
+      <p>Standard: {pricing.IMAGE_GENERATION_STANDARD} credits</p>
+      <p>Raw: {pricing.IMAGE_GENERATION_RAW} credits</p>
+
+      <h2>Video Generation</h2>
+      <p>Veo 3.0: {pricing.VIDEO_GENERATION_VEO3} credits</p>
+      <p>Veo 2.0: {pricing.VIDEO_GENERATION_VEO2} credits</p>
+    </div>
+  );
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="SDK Helpers" icon="wand-magic-sparkles" href="/sdk/helpers">
+    Learn about withCreditsCheck() and other SDK helpers
+  </Card>
+  <Card title="Complete Examples" icon="book-open" href="/examples/nextjs">
+    See pricing in full production apps
+  </Card>
+  <Card title="API Routes" icon="route" href="/examples/api-routes">
+    Protect your API routes with credit checks
+  </Card>
+  <Card
+    title="React Hooks"
+    icon="react"
+    href="/sdk/helpers#client-side-helpers-react"
+  >
+    Display pricing in your UI with React hooks
+  </Card>
+</CardGroup>
